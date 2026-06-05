@@ -2,6 +2,8 @@
 
 This script is designed for a 3 to 5 minute MVP demo video. The goal is to show the complete AnytimeSpeak loop clearly: choose a scenario, practice a conversation, receive feedback, end the session, and review a scored summary.
 
+Important current-state note: as of this documentation PR, the repository contains only a minimal frontend scaffold and a backend health endpoint. Use this script as the target final demo script, and only show or narrate sections that have been implemented by the time the video is recorded.
+
 ## Recording Setup
 
 - Use mock mode if API keys are unavailable.
@@ -9,6 +11,7 @@ This script is designed for a 3 to 5 minute MVP demo video. The goal is to show 
 - Use speech input and playback only if the browser supports them reliably during recording.
 - Record a single complete session from scenario selection to post-session summary.
 - Avoid using personal information in sample conversation messages.
+- Before recording, compare the app against `docs/mvp-checklist.md` and skip any narration for features that are still planned but not implemented.
 
 ## Suggested Timing
 
@@ -29,6 +32,10 @@ Show the app landing or scenario selection screen.
 Suggested narration:
 
 > Hi, this is AnytimeSpeak, an AI English speaking practice tool. The MVP helps learners practice realistic conversations in common scenarios, receive grammar and expression feedback, and review a scored summary after each session. The demo focuses on a stable practice loop that can run in mock mode without private API keys.
+
+If the final build is still incomplete, use this safer narration:
+
+> Hi, this is AnytimeSpeak, an AI English speaking practice project. This video explains the intended MVP loop and shows the parts currently implemented in the repository. The project is designed to support scenario-based practice, feedback, summaries, scores, and mock mode for reproducible demos.
 
 Key points to mention:
 
@@ -151,10 +158,16 @@ Suggested narration:
 
 > The frontend is built with React, Vite, and TypeScript. The backend uses FastAPI and Python. AI provider configuration is handled through environment variables, and mock mode keeps the demo reproducible when API keys are unavailable.
 
+Current repository note:
+
+- The current backend has `/api/health`.
+- Planned MVP endpoints are documented in `docs/api-contract.md`.
+- Do not say `/api/scenarios`, `/api/chat`, `/api/feedback`, or `/api/summary` are complete until they are implemented.
+
 Key architecture points:
 
-- Frontend handles scenario selection, practice UI, speech input, speech playback, feedback display, and summary review.
-- Backend provides health, chat, feedback, and summary endpoints as the MVP grows.
+- Planned frontend responsibilities include scenario selection, practice UI, speech input, speech playback, feedback display, and summary review.
+- Backend provides the health endpoint now and can add chat, feedback, and summary endpoints as the MVP grows.
 - Browser `SpeechRecognition` is used where supported for speech input.
 - Browser `SpeechSynthesis` is used for AI reply playback.
 - Mock mode is required for stable local demos without private credentials.
@@ -165,7 +178,7 @@ Return to the summary screen or show the completed demo loop.
 
 Suggested narration:
 
-> This demo shows the complete AnytimeSpeak MVP loop: select a scenario, practice a realistic conversation, receive grammar and expression feedback, end the session, and review a scored summary. The next improvements can refine voice quality, scoring rules, and feedback accuracy, while keeping the stable text-based practice loop available.
+> When the final MVP path is implemented, this demo should show the complete AnytimeSpeak loop: select a scenario, practice a realistic conversation, receive grammar and expression feedback, end the session, and review a scored summary. The next improvements can refine voice quality, scoring rules, and feedback accuracy, while keeping the stable text-based practice loop available.
 
 Final checklist before stopping the recording:
 

@@ -2,6 +2,8 @@
 
 Use this checklist before the final MVP submission and before opening or merging release-related PRs.
 
+Current-state note: unchecked items are not claims that the feature already exists. This checklist is a final acceptance tool for the MVP and should be updated only when the implementation actually supports the item.
+
 ## Functional Completeness
 
 - [ ] User can choose an MVP scenario: Interview, Restaurant Ordering, or Meeting.
@@ -30,6 +32,8 @@ Use this checklist before the final MVP submission and before opening or merging
 
 - [ ] FastAPI service starts with the documented command.
 - [ ] Health endpoint confirms the backend is running.
+- [ ] `/api/health` returns `{"status":"ok"}`.
+- [ ] Planned endpoints follow `docs/api-contract.md` when implemented.
 - [ ] Chat endpoint supports the MVP conversation flow.
 - [ ] Feedback or summary endpoints support mock mode when provider keys are unavailable.
 - [ ] Environment variables are used for provider configuration.
@@ -76,6 +80,7 @@ Use this checklist before the final MVP submission and before opening or merging
 ## PR And Commit Hygiene
 
 - [ ] Each PR has one focused purpose.
+- [ ] Docs-only PRs avoid changes under `frontend/` and `backend/` unless explicitly required.
 - [ ] PR title is concise and follows project conventions.
 - [ ] PR description includes feature description.
 - [ ] PR description includes implementation approach.
