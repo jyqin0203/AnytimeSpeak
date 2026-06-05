@@ -23,16 +23,43 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 
 ## Current Status
 
-The project is in the planning and documentation initialization stage. No frontend or backend business code has been implemented yet.
+The project has a minimal frontend and backend scaffold. No scenario selection, AI conversation, speech feature, database, or other business flow has been implemented yet.
 
 ## Local Development
 
-Setup commands will be added after the frontend and backend projects are initialized.
+### Frontend
 
 ```bash
-# Placeholder
-# Frontend and backend startup commands will be documented in later PRs.
+cd frontend
+npm install
+npm run dev
 ```
+
+The Vite development server will print the local frontend URL in the terminal, usually `http://localhost:5173`.
+
+### Backend
+
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
+```
+
+Health check:
+
+```bash
+curl http://127.0.0.1:8000/api/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+### Environment Variables
+
+Copy `.env.example` to `.env` for local provider configuration when LLM integration is added later. Do not commit `.env` or real API keys.
 
 ## Demo Video
 
@@ -40,9 +67,9 @@ Demo video link: TBD
 
 ## Originality and Third-Party Dependencies
 
-- Original project code: TBD as implementation begins.
-- Third-party libraries and frameworks: TBD as dependencies are added.
-- AI APIs or AI-generated code usage: TBD and will be documented in each related PR.
+- Original project code: project scaffold, backend health endpoint, and documentation are maintained in this repository.
+- Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, and HTTPX.
+- AI APIs or AI-generated code usage: no AI API is integrated yet. LLM environment variable placeholders are listed in `.env.example`.
 - API keys, private credentials, and unauthorized assets must not be committed.
 
 ## Development Plan
