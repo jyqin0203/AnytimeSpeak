@@ -95,3 +95,94 @@ def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.
     assert response.scenario_id == "meeting"
     assert response.summary == "You handled the meeting clearly."
     assert response.scores.overall == 85
+
+
+def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
+    import app.llm_provider as llm_provider
+
+    messages = llm_provider._chat_prompt(
+        ChatRequest(
+            scenario_id="travel",
+            messages=[ChatMessage(role="user", content="我想 check in early.")],
+        )
+    )
+    prompt_text = "\n".join(message["content"] for message in messages)
+
+    assert "Travel service representative or helpful local guide" in prompt_text
+    assert "Traveler" in prompt_text
+    assert "Ask for directions or travel information" in prompt_text
+    assert "clear, patient, and practical" in prompt_text.lower()
+    assert "Chinese-English mixed input" in prompt_text
+    assert "continue the conversation naturally" in prompt_text
+
+
+def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanations():
+    import app.llm_provider as llm_provider
+
+    messages = llm_provider._feedback_prompt(
+        FeedbackRequest(
+            scenario_id="meeting",
+            message="I want to 预约一个 meeting tomorrow.",
+        )
+    )
+    prompt_text = "\n".join(message["content"] for message in messages)
+
+    assert "Team lead" in prompt_text
+    assert "user_intent_zh" in prompt_text
+    assert "code_switching_tip" in prompt_text
+    assert "中文" in prompt_text
+    assert "不要羞辱用户" in prompt_text
+
+
+def test_summary_prompt_uses_goal_scoring_focus_and_code_switching_summary():
+    import app.llm_provider as llm_provider
+
+    messages = llm_provider._summary_prompt(
+        SummaryRequest(
+            scenario_id="daily_conversation",
+            messages=[
+                ChatMessage(role="user", content="Today is good."),
+                ChatMessage(role="user", content="我 after work watch movie."),
+            ],
+        )
+    )
+    prompt_text = "\n".join(message["content"] for message in messages)
+
+    assert "Friendly conversation partner" in prompt_text
+    assert "Build comfort with casual English conversation" in prompt_text
+    assert "basic tense, articles, and sentence structure" in prompt_text
+    assert "中英转换建议" in prompt_text
+    assert "summary mostly in Chinese" in prompt_text
+
+
+def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages):
+        return """
+        {
+          "corrected_sentence": "I want to schedule a meeting tomorrow.",
+          "issue": "你想表达预约会议，核心意思很清楚。",
+          "better_expression": "I'd like to schedule a meeting for tomorrow.",
+          "user_intent_zh": "我想约一个明天的会议。",
+          "code_switching_tip": "把“预约一个 meeting”整体换成 schedule a meeting。",
+          "score": 82
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(
+            scenario_id="meeting",
+            message="I want to 预约一个 meeting tomorrow.",
+        )
+    )
+
+    assert response.user_intent_zh == "我想约一个明天的会议。"
+    assert "schedule a meeting" in response.code_switching_tip

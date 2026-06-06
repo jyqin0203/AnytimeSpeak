@@ -35,6 +35,8 @@ class FeedbackResponse(BaseModel):
     corrected_sentence: str
     issue: str
     better_expression: str
+    user_intent_zh: str | None = None
+    code_switching_tip: str | None = None
     score: int = Field(ge=0, le=100)
 
 
@@ -65,4 +67,5 @@ class SummaryResponse(BaseModel):
     better_expressions: list[str]
     scenario_completion: str
     next_practice_focus: str
+    code_switching_advice: str | None = None
     scores: ScoreBreakdown

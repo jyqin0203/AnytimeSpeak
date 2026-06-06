@@ -59,6 +59,44 @@ def test_feedback_endpoint_returns_correction_and_expression_tip():
     assert 0 <= body["score"] <= 100
 
 
+def test_feedback_endpoint_supports_chinese_input_with_english_suggestion():
+    response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "meeting",
+            "message": "我想约一个明天的会议。",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["corrected_sentence"] == "I want to schedule a meeting for tomorrow."
+    assert "中文" in body["issue"]
+    assert "schedule a meeting" in body["better_expression"]
+    assert body["user_intent_zh"] == "我想约一个明天的会议。"
+
+
+def test_chat_endpoint_supports_mixed_input_without_breaking_mock_fallback():
+    response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "meeting",
+            "messages": [
+                {"role": "assistant", "content": "What progress have you made?"},
+                {"role": "user", "content": "I want to 预约一个 meeting tomorrow."},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["scenario_id"] == "meeting"
+    assert body["reply"]["role"] == "assistant"
+    assert "meeting" in body["reply"]["content"].lower()
+    assert "schedule a meeting" in body["quick_feedback"]["better_expression"]
+    assert body["quick_feedback"]["code_switching_tip"]
+
+
 def test_summary_endpoint_returns_scores_and_reusable_suggestions():
     response = client.post(
         "/api/summary",

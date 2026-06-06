@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from app import mock_service
+from app.scenario_catalog import ScenarioPromptConfig, get_scenario_prompt_config
 from app.schemas import (
     ChatMessage,
     ChatRequest,
@@ -61,11 +62,12 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
             better_expressions=_string_list(data["better_expressions"]),
             scenario_completion=str(data["scenario_completion"]),
             next_practice_focus=str(data["next_practice_focus"]),
+            code_switching_advice=_optional_string(data.get("code_switching_advice")),
             scores=ScoreBreakdown(
                 grammar=int(scores["grammar"]),
                 expression=int(scores["expression"]),
                 fluency=int(scores["fluency"]),
-                scenario_completion=int(scores["scenario_completion"]),
+                scenario_completion=int(scores.get("scenario_completion", scores.get("completion"))),
                 overall=int(scores["overall"]),
             ),
         )
@@ -111,22 +113,33 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
 
 
 def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
+    scenario = get_scenario_prompt_config(request.scenario_id)
     transcript = _transcript(request.messages)
     return [
         {
             "role": "system",
-            "content": (
-                "You are an English speaking practice role-play assistant. "
-                "Return JSON only with keys reply and quick_feedback. "
-                "reply must include role='assistant' and content. "
-                "quick_feedback must include corrected_sentence, issue, "
-                "better_expression, and score from 0 to 100."
+            "content": _scenario_context(
+                scenario,
+                extra_instructions=(
+                    "You are the AI role in a spoken English practice conversation. "
+                    "Stay in the assigned AI role during reply.content. "
+                    "Use mostly natural spoken English suitable for the scenario. "
+                    "Ask one clear follow-up question at a time. "
+                    "If the learner uses Chinese or Chinese-English mixed input, "
+                    "understand the intent and continue the conversation naturally; "
+                    "do not stop the role play or criticize the learner for code-switching. "
+                    "Return JSON only with keys reply and quick_feedback. "
+                    "reply must include role='assistant' and content. "
+                    "quick_feedback must include corrected_sentence, issue, "
+                    "better_expression, user_intent_zh, code_switching_tip, and score from 0 to 100. "
+                    "Keep quick_feedback brief and encouraging."
+                ),
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Scenario: {request.scenario_id}\n"
+                f"Scenario id: {request.scenario_id}\n"
                 f"Conversation:\n{transcript}\n"
                 "Continue the role-play with one concise assistant reply and brief feedback."
             ),
@@ -135,37 +148,61 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
 
 
 def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
+    scenario = get_scenario_prompt_config(request.scenario_id)
     return [
         {
             "role": "system",
-            "content": (
-                "You are an English speaking coach. Return JSON only with keys "
-                "corrected_sentence, issue, better_expression, and score from 0 to 100."
+            "content": _scenario_context(
+                scenario,
+                extra_instructions=(
+                    "You are an encouraging English speaking coach. "
+                    "Support English, Chinese, and Chinese-English mixed learner input. "
+                    "If the input contains Chinese, first infer the learner's intended meaning, "
+                    "then provide a natural English sentence. "
+                    "Use 中文 explanations so the learner can understand easily. "
+                    "不要羞辱用户，不要说用户英语很差；用鼓励式反馈。 "
+                    "Return JSON only with keys corrected_sentence, issue, better_expression, "
+                    "user_intent_zh, code_switching_tip, and score. "
+                    "corrected_sentence and better_expression must be natural English. "
+                    "issue must be Chinese. user_intent_zh should explain the learner's meaning in Chinese "
+                    "when it can be inferred, otherwise null. code_switching_tip should explain in Chinese "
+                    "how to turn mixed Chinese-English wording into natural English, otherwise null. "
+                    "score must be 0 to 100."
+                ),
             ),
         },
         {
             "role": "user",
-            "content": f"Scenario: {request.scenario_id}\nLearner sentence: {request.message}",
+            "content": f"Scenario id: {request.scenario_id}\nLearner sentence: {request.message}",
         },
     ]
 
 
 def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
+    scenario = get_scenario_prompt_config(request.scenario_id)
     return [
         {
             "role": "system",
-            "content": (
-                "You are an English speaking coach. Return JSON only with keys "
-                "summary, strengths, repeated_issues, better_expressions, "
-                "scenario_completion, next_practice_focus, and scores. "
-                "scores must include grammar, expression, fluency, "
-                "scenario_completion, and overall from 0 to 100."
+            "content": _scenario_context(
+                scenario,
+                extra_instructions=(
+                    "You are an English speaking coach creating a post-session summary. "
+                    "Make the summary mostly in Chinese, but keep reusable expressions in English. "
+                    "Assess performance using the scenario goal and scoring focus. "
+                    "If the learner used Chinese-English mixed input multiple times, include a practical "
+                    "中英转换建议 in code_switching_advice. "
+                    "Return JSON only with keys summary, strengths, repeated_issues, "
+                    "better_expressions, scenario_completion, next_practice_focus, "
+                    "code_switching_advice, and scores. "
+                    "scores must include grammar, expression, fluency, scenario_completion, "
+                    "and overall from 0 to 100."
+                ),
             ),
         },
         {
             "role": "user",
             "content": (
-                f"Scenario: {request.scenario_id}\n"
+                f"Scenario id: {request.scenario_id}\n"
                 f"Conversation:\n{_transcript(request.messages)}\n"
                 "Create a concise post-session practice summary."
             ),
@@ -204,6 +241,8 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
         corrected_sentence=str(data["corrected_sentence"]),
         issue=str(data["issue"]),
         better_expression=str(data["better_expression"]),
+        user_intent_zh=_optional_string(data.get("user_intent_zh")),
+        code_switching_tip=_optional_string(data.get("code_switching_tip")),
         score=int(data["score"]),
     )
 
@@ -214,7 +253,37 @@ def _string_list(value: Any) -> list[str]:
     return [str(item) for item in value]
 
 
+def _optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
 def _transcript(messages: list[ChatMessage]) -> str:
     if not messages:
         return "(no prior messages)"
     return "\n".join(f"{message.role}: {message.content}" for message in messages)
+
+
+def _scenario_context(scenario: ScenarioPromptConfig, extra_instructions: str) -> str:
+    return (
+        "You are an English speaking practice partner for AnytimeSpeak.\n"
+        f"Scenario: {scenario.title_en} / {scenario.title_zh}\n"
+        f"Canonical scenario id: {scenario.scenario_id}\n"
+        f"AI role: {scenario.ai_role}\n"
+        f"User role: {scenario.user_role}\n"
+        f"Practice goal: {scenario.goal}\n"
+        f"Suitable difficulty: {scenario.level}\n"
+        f"Conversation style: {scenario.conversation_style}\n"
+        f"Feedback focus: {_bullets(scenario.feedback_focus)}\n"
+        f"Useful expressions: {_bullets(scenario.useful_expressions)}\n"
+        f"Scoring focus: {_bullets(scenario.scoring_focus)}\n"
+        "Code-switching policy: Chinese-English mixed input is allowed. "
+        "Treat it as a low-pressure speaking bridge, infer the learner's intent, "
+        "and guide them toward natural English.\n"
+        f"Instructions: {extra_instructions}"
+    )
+
+
+def _bullets(items: list[str]) -> str:
+    return "; ".join(items)
