@@ -79,9 +79,9 @@ def _should_use_llm() -> bool:
     if os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower() != "llm":
         return False
 
-    return all(
+    return bool(_llm_api_key()) and all(
         os.getenv(name, "").strip()
-        for name in ("LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL")
+        for name in ("LLM_BASE_URL", "LLM_MODEL")
     )
 
 
@@ -96,7 +96,7 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
     response = httpx.post(
         endpoint,
         headers={
-            "Authorization": f"Bearer {os.environ['LLM_API_KEY']}",
+            "Authorization": f"Bearer {_llm_api_key()}",
             "Content-Type": "application/json",
         },
         json={
@@ -110,6 +110,10 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
     response.raise_for_status()
     payload = response.json()
     return str(payload["choices"][0]["message"]["content"])
+
+
+def _llm_api_key() -> str:
+    return os.getenv("OPENAI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
 
 
 def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:

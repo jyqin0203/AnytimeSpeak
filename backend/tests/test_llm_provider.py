@@ -4,7 +4,7 @@ from app.schemas import ChatMessage, ChatRequest, FeedbackRequest, SummaryReques
 
 
 def _clear_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name in ("LLM_PROVIDER_MODE", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
+    for name in ("LLM_PROVIDER_MODE", "OPENAI_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -53,6 +53,46 @@ def test_feedback_falls_back_to_mock_when_llm_call_fails(monkeypatch: pytest.Mon
         "I graduated last year and I was responsible for making the report."
     )
     assert "simple past" in response.issue.lower()
+
+
+def test_llm_provider_uses_openai_api_key_env(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    captured_headers = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"corrected_sentence":"OK","issue":"说明","better_expression":"OK","score":90}'
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured_headers.update(headers)
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_provider.httpx, "post", fake_post)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="interview", message="I want practice.")
+    )
+
+    assert captured_headers["Authorization"] == "Bearer openai-test-key"
+    assert response.score == 90
 
 
 def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.MonkeyPatch):
