@@ -9,7 +9,9 @@ export type Scenario = {
   aiRole: string;
   userRole: string;
   goal: string;
-  storyIntro: string;
+  storySeedId: string;
+  storyIntroZh: string;
+  storyIntroEn: string;
   level: string;
   duration: string;
   focus: string[];
@@ -22,11 +24,14 @@ export type Message = { id: number; sender: Sender; text: string };
 export type PracticeSession = {
   sessionId: string;
   scenarioId: string;
-  storyIntro: string;
+  storySeedId: string;
+  storyIntroZh: string;
+  storyIntroEn: string;
   openingMessage: string;
   messages: Message[];
   createdAt: string;
 };
+export type FeedbackScoreBreakdown = Record<"语法" | "自然度" | "贴合度" | "清晰度", number>;
 export type Feedback = {
   id: number;
   whatYouSaid: string;
@@ -36,6 +41,7 @@ export type Feedback = {
   why: string;
   moreNaturalOption: string;
   score: number;
+  scoreBreakdown: FeedbackScoreBreakdown;
   provider: string;
 };
 export type ScoreBreakdown = Record<"语法" | "表达" | "流畅" | "完成度" | "综合", number>;
@@ -45,6 +51,7 @@ export type SessionSummary = {
   repeatedIssues: string[];
   betterExpressions: string[];
   scores: ScoreBreakdown;
+  provider: string;
 };
 
 type ApiScenario = {
@@ -56,7 +63,9 @@ type ApiScenario = {
   ai_role: string;
   user_role: string;
   goal: string;
-  story_intro: string;
+  story_seed_id: string;
+  story_intro_zh: string;
+  story_intro_en: string;
   opening_line: string;
   opening_message: string;
   conversation_style: string;
@@ -68,10 +77,18 @@ type ApiChatMessage = { role: "user" | "assistant"; content: string };
 type ApiSession = {
   session_id: string;
   scenario_id: string;
-  story_intro: string;
+  story_seed_id: string;
+  story_intro_zh: string;
+  story_intro_en: string;
   opening_message: string;
   messages: ApiChatMessage[];
   created_at: string;
+};
+type ApiFeedbackScoreBreakdown = {
+  grammar: number;
+  naturalness: number;
+  relevance: number;
+  clarity: number;
 };
 type ApiFeedback = {
   what_you_said: string;
@@ -81,6 +98,7 @@ type ApiFeedback = {
   why: string;
   more_natural_option: string;
   score: number;
+  score_breakdown: ApiFeedbackScoreBreakdown;
   provider: string;
 };
 type ApiChatResponse = { reply: ApiChatMessage };
@@ -96,6 +114,7 @@ type ApiSummaryResponse = {
     scenario_completion: number;
     overall: number;
   };
+  provider: string;
 };
 
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
@@ -111,7 +130,10 @@ export const localScenarios: Scenario[] = [
     aiRole: "招聘经理",
     userRole: "候选人",
     goal: "清楚介绍自己，说明经验价值，并提出一个专业追问。",
-    storyIntro: "你正在参加一场初级岗位的视频面试。招聘经理已经看过简历，希望听到你用清楚、有信心的英文讲出背景、项目和动机。",
+    storySeedId: "interview_first_round",
+    storyIntroZh: "你正在参加一场初级岗位的视频面试。招聘经理已经看过简历，希望听到你用清楚、有信心的英文讲出背景、项目和动机。",
+    storyIntroEn:
+      "You are taking part in a video interview for an entry-level role. The hiring manager has already read your resume and wants to hear you describe your background, projects, and motivation in clear, confident English.",
     level: "进阶",
     duration: "8 分钟",
     focus: ["自我介绍", "STAR 表达", "职业动机"],
@@ -133,7 +155,10 @@ export const localScenarios: Scenario[] = [
     aiRole: "餐厅服务员",
     userRole: "顾客",
     goal: "点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
-    storyIntro: "午餐时间你走进一家有点忙的咖啡店。队伍在往前移动，你需要礼貌地询问推荐、说明偏好，并确认最终点单。",
+    storySeedId: "ordering_cafe",
+    storyIntroZh: "午餐时间你走进一家有点忙的咖啡店。队伍在往前移动，你需要礼貌地询问推荐、说明偏好，并确认最终点单。",
+    storyIntroEn:
+      "It's lunchtime and you walk into a slightly busy cafe. The line is moving forward, so you need to politely ask for recommendations, explain your preferences, and confirm your final order.",
     level: "入门",
     duration: "6 分钟",
     focus: ["礼貌请求", "偏好说明", "订单确认"],
@@ -154,7 +179,10 @@ export const localScenarios: Scenario[] = [
     aiRole: "团队负责人",
     userRole: "团队成员",
     goal: "给出进展更新，说明问题，确认下一步和完成时间。",
-    storyIntro: "你正在参加一个简短的团队站会。团队负责人需要你简洁说明进展、阻塞点，以及接下来可以跟进的行动。",
+    storySeedId: "meeting_standup",
+    storyIntroZh: "你正在参加一个简短的团队站会。团队负责人需要你简洁说明进展、阻塞点，以及接下来可以跟进的行动。",
+    storyIntroEn:
+      "You are joining a short team stand-up meeting. The team lead needs you to briefly share your progress, any blockers, and the next actions you plan to follow up on.",
     level: "进阶",
     duration: "8 分钟",
     focus: ["进度汇报", "问题说明", "下一步对齐"],
@@ -183,7 +211,9 @@ export async function fetchScenarios(): Promise<Scenario[]> {
       aiRole: local?.aiRole ?? scenario.ai_role,
       userRole: local?.userRole ?? scenario.user_role,
       goal: local?.goal ?? scenario.goal,
-      storyIntro: scenario.story_intro,
+      storySeedId: scenario.story_seed_id,
+      storyIntroZh: scenario.story_intro_zh,
+      storyIntroEn: scenario.story_intro_en,
       level: local?.level ?? scenario.level,
       duration: local?.duration ?? "8 分钟",
       focus: local?.focus ?? scenario.feedback_focus,
@@ -203,7 +233,9 @@ export async function startPracticeSession(scenario: Scenario): Promise<Practice
   return {
     sessionId: response.session_id,
     scenarioId: response.scenario_id,
-    storyIntro: response.story_intro,
+    storySeedId: response.story_seed_id,
+    storyIntroZh: response.story_intro_zh,
+    storyIntroEn: response.story_intro_en,
     openingMessage: response.opening_message,
     messages: response.messages.map(fromApiMessage),
     createdAt: response.created_at,
@@ -254,6 +286,12 @@ export async function fetchTurnFeedback(
     why: response.why,
     moreNaturalOption: response.more_natural_option,
     score: response.score,
+    scoreBreakdown: {
+      "语法": response.score_breakdown.grammar,
+      "自然度": response.score_breakdown.naturalness,
+      "贴合度": response.score_breakdown.relevance,
+      "清晰度": response.score_breakdown.clarity,
+    },
     provider: response.provider,
   };
 }
@@ -276,30 +314,13 @@ export async function fetchSessionSummary(scenario: Scenario, messages: Message[
       "完成度": response.scores.scenario_completion,
       "综合": response.scores.overall,
     },
+    provider: response.provider,
   };
 }
 
 export function createLocalReply(scenario: Scenario, messages: Message[]): Message {
   const turn = Math.max(0, messages.filter((message) => message.sender === "user").length - 1);
   return { id: Date.now() + 1, sender: "ai", text: scenario.replies[turn % scenario.replies.length] };
-}
-
-export function createLocalFeedback(input: string, id = Date.now()): Feedback {
-  const text = input.trim();
-  const sentence = text.endsWith(".") || text.endsWith("?") || text.endsWith("!") ? text : `${text}.`;
-  const corrected = sentence.charAt(0).toUpperCase() + sentence.slice(1);
-
-  return {
-    id,
-    whatYouSaid: text,
-    userIntent: "你想继续完成当前场景回答。",
-    recommendedEnglish: corrected,
-    issue: "后端暂不可用，当前使用前端本地 mock：句子意思清楚，可继续补充细节和自然连接词。",
-    why: "当前 fallback 只能给出通用建议，后端恢复后会按场景和上下文分析。",
-    moreNaturalOption: "I would like to add one specific example to explain my answer.",
-    score: Math.min(94, 78 + Math.min(10, Math.floor(text.length / 16))),
-    provider: "local-fallback",
-  };
 }
 
 export function createLocalSummary(messages: Message[], feedback: Feedback[]): SessionSummary {
@@ -323,6 +344,7 @@ export function createLocalSummary(messages: Message[], feedback: Feedback[]): S
       "完成度": turns > 2 ? 90 : 82,
       "综合": Math.round((avg + 86 + 84 + 88) / 4),
     },
+    provider: "local-fallback",
   };
 }
 

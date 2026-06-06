@@ -17,23 +17,51 @@ def test_scenarios_endpoint_returns_mvp_scenarios():
     interview = next(scenario for scenario in scenarios if scenario["id"] == "interview")
     assert interview["scenario_id"] == "interview"
     assert interview["ai_role"] == "Hiring manager"
-    assert "story_intro" in interview
-    assert "waiting in a video interview" in interview["story_intro"].lower()
+    assert interview["story_seed_id"]
+    assert interview["story_intro_zh"]
+    assert "video interview" in interview["story_intro_en"].lower()
     assert interview["opening_line"].startswith("Hi, thanks for joining today")
 
 
 def test_start_session_returns_story_opening_and_empty_messages():
-    response = client.post("/api/sessions", json={"scenario_id": "meeting"})
+    response = client.post(
+        "/api/sessions",
+        json={"scenario_id": "meeting", "story_seed_id": "meeting_standup"},
+    )
 
     assert response.status_code == 200
     body = response.json()
     assert body["session_id"].startswith("session_")
     assert body["scenario_id"] == "meeting"
     assert body["scenario"]["ai_role"] == "Team lead"
-    assert "story_intro" in body
+    assert body["story_seed_id"] == "meeting_standup"
+    assert body["story_intro_zh"]
+    assert body["story_intro_en"]
     assert body["opening_message"].startswith("Let's start with your update")
     assert body["messages"] == []
     assert body["created_at"]
+
+
+def test_start_session_can_return_different_seeds_or_a_fixed_one():
+    seed_ids = set()
+    for _ in range(20):
+        response = client.post("/api/sessions", json={"scenario_id": "interview"})
+        assert response.status_code == 200
+        seed_ids.add(response.json()["story_seed_id"])
+
+    assert seed_ids.issubset(
+        {"interview_first_round", "interview_project_dive", "interview_internship"}
+    )
+    assert len(seed_ids) > 1
+
+    fixed_response = client.post(
+        "/api/sessions",
+        json={"scenario_id": "interview", "story_seed_id": "interview_internship"},
+    )
+    assert fixed_response.status_code == 200
+    fixed_body = fixed_response.json()
+    assert fixed_body["story_seed_id"] == "interview_internship"
+    assert fixed_body["opening_message"].startswith("Hi, welcome!")
 
 
 def test_chat_endpoint_returns_scenario_aware_mock_reply():
@@ -77,9 +105,10 @@ def test_feedback_endpoint_returns_correction_and_expression_tip():
     assert body["recommended_english"] == (
         "I graduated last year and I was responsible for making the report."
     )
-    assert "simple past" in body["issue"].lower()
-    assert "I contributed to" in body["more_natural_option"]
-    assert "score_breakdown" in body
+    assert "i am graduated" in body["issue"].lower()
+    assert "i graduated" in body["issue"].lower()
+    assert body["recommended_english"].rstrip(".!?") in body["more_natural_option"]
+    assert set(body["score_breakdown"]) == {"grammar", "naturalness", "relevance", "clarity"}
     assert body["provider"] == "mock"
     assert 0 <= body["score"] <= 100
 
@@ -95,7 +124,8 @@ def test_feedback_endpoint_supports_chinese_input_with_english_suggestion():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["recommended_english"] == "I want to schedule a meeting for tomorrow."
+    assert "schedule a meeting" in body["recommended_english"].lower()
+    assert "tomorrow" in body["recommended_english"].lower()
     assert "中文" in body["issue"]
     assert "schedule a meeting" in body["more_natural_option"]
     assert body["user_intent"] == "我想约一个明天的会议。"
@@ -151,7 +181,7 @@ def test_summary_endpoint_returns_scores_and_reusable_suggestions():
     assert response.status_code == 200
     body = response.json()
     assert body["scenario_id"] == "meeting"
-    assert "meeting" in body["summary"].lower()
+    assert "会议" in body["summary"]
     assert "The main blocker is" in body["better_expressions"][0]
     scores = body["scores"]
     assert set(scores) == {

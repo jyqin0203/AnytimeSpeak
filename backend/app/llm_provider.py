@@ -1,11 +1,12 @@
 import json
+import logging
 import os
 from typing import Any
 
 import httpx
 
 from app import mock_service
-from app.scenario_catalog import ScenarioPromptConfig, get_scenario_prompt_config
+from app.scenario_catalog import get_scenario_prompt_config
 from app.schemas import (
     ChatMessage,
     ChatRequest,
@@ -13,6 +14,7 @@ from app.schemas import (
     FeedbackScoreBreakdown,
     FeedbackRequest,
     FeedbackResponse,
+    Scenario,
     ScoreBreakdown,
     SummaryRequest,
     SummaryResponse,
@@ -23,11 +25,28 @@ LLM_TIMEOUT_SECONDS = 20.0
 DEFAULT_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 DEFAULT_LLM_MODEL = "qwen-plus"
 
+logger = logging.getLogger(__name__)
+
+
+def _log_llm_attempt(operation: str) -> None:
+    logger.info("llm_provider: provider_mode=llm, attempting %s via LLM provider", operation)
+
+
+def _log_fallback(operation: str, error: Exception) -> None:
+    # Log only the operation and exception type — never the exception message or
+    # request payload, since either could end up echoing configuration values.
+    logger.warning(
+        "llm_provider: %s via LLM provider failed (%s); falling back to mock provider",
+        operation,
+        type(error).__name__,
+    )
+
 
 def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
     if not _should_use_llm():
         return mock_service.create_chat_reply(request)
 
+    _log_llm_attempt("chat reply")
     try:
         data = _json_from_llm(_request_chat_completion(_chat_prompt(request)))
         return ChatResponse(
@@ -36,7 +55,8 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
             reply=_chat_message_from_data(data.get("reply")),
             quick_feedback=_feedback_from_data(data.get("quick_feedback", {})),
         )
-    except Exception:
+    except Exception as exc:
+        _log_fallback("chat reply", exc)
         return mock_service.create_chat_reply(request)
 
 
@@ -44,10 +64,12 @@ def create_feedback_with_fallback(request: FeedbackRequest) -> FeedbackResponse:
     if not _should_use_llm():
         return mock_service.create_feedback(request)
 
+    _log_llm_attempt("feedback")
     try:
         data = _json_from_llm(_request_chat_completion(_feedback_prompt(request)))
         return _feedback_from_data(data)
-    except Exception:
+    except Exception as exc:
+        _log_fallback("feedback", exc)
         return mock_service.create_feedback(request)
 
 
@@ -55,6 +77,7 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
     if not _should_use_llm():
         return mock_service.create_summary(request)
 
+    _log_llm_attempt("session summary")
     try:
         data = _json_from_llm(_request_chat_completion(_summary_prompt(request)))
         scores = data.get("scores", {})
@@ -74,8 +97,10 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
                 scenario_completion=int(scores.get("scenario_completion", scores.get("completion"))),
                 overall=int(scores["overall"]),
             ),
+            provider="llm",
         )
-    except Exception:
+    except Exception as exc:
+        _log_fallback("session summary", exc)
         return mock_service.create_summary(request)
 
 
@@ -126,7 +151,7 @@ def _llm_model() -> str:
 
 
 def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
-    scenario = get_scenario_prompt_config(request.scenario_id)
+    scenario = mock_service.resolve_scenario(request.session_id, request.scenario_id)
     history = _transcript(_conversation_history(request))
     latest_user_message = _latest_user_message(request)
     return [
@@ -135,13 +160,20 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
             "content": _scenario_context(
                 scenario,
                 extra_instructions=(
-                    "You are the AI role in a spoken English practice conversation. "
-                    "Stay in the assigned AI role during reply.content. "
-                    "Use mostly natural spoken English suitable for the scenario. "
-                    "Ask one clear follow-up question at a time. "
-                    "If the learner uses Chinese or Chinese-English mixed input, "
-                    "understand the intent and continue the conversation naturally; "
-                    "do not stop the role play or criticize the learner for code-switching. "
+                    "You are the AI role in a spoken English roleplay practice session. "
+                    "Ground every reply in the specific story, AI role, and conversation history "
+                    "above — never give generic, template-like follow-ups that could fit any "
+                    "scenario, and vary your sentence patterns across turns so the conversation "
+                    "feels alive rather than scripted. "
+                    "Keep replies natural, brief (one to three sentences), and easy to read aloud "
+                    "for spoken practice. "
+                    "If the learner's message is unclear, briefly acknowledge what you did "
+                    "understand and ask exactly one specific clarifying question. "
+                    "If the learner drifts off-topic, respond naturally and briefly, then gently "
+                    "steer the conversation back toward the scenario goal while staying in character. "
+                    "If the learner mixes Chinese and English, infer their meaning and continue "
+                    "naturally in your AI role — never break character to translate or lecture "
+                    "about language. "
                     "Return JSON only with keys reply and quick_feedback. "
                     "reply must include role='assistant' and content. "
                     "quick_feedback must include what_you_said, user_intent, "
@@ -164,7 +196,7 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
 
 
 def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
-    scenario = get_scenario_prompt_config(request.scenario_id)
+    scenario = mock_service.resolve_scenario(request.session_id, request.scenario_id)
     history = _transcript(request.conversation_history)
     latest_user_message = request.latest_user_message or request.message or ""
     return [
@@ -173,19 +205,38 @@ def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
             "content": _scenario_context(
                 scenario,
                 extra_instructions=(
-                    "You are an encouraging English speaking coach. "
-                    "Support English, Chinese, and Chinese-English mixed learner input. "
-                    "If the input contains Chinese, first infer the learner's intended meaning, "
-                    "then provide a natural English sentence. "
-                    "Only evaluate the latest user message. Use the previous conversation only "
-                    "to understand context; never grade or reuse feedback from older turns. "
-                    "Use 中文 explanations so the learner can understand easily. "
-                    "不要羞辱用户，不要说用户英语很差；用鼓励式反馈。 "
+                    "You are an experienced, encouraging spoken-English coach reviewing exactly "
+                    "ONE learner turn. Base your analysis strictly on the latest user message "
+                    "below — never grade or reuse feedback from earlier turns; use the previous "
+                    "conversation, the scenario, and the story only to understand the learner's "
+                    "intent in this turn. "
+                    "If the input mixes Chinese and English, first work out what the learner is "
+                    "actually trying to say, then write recommended_english as a natural, fluent "
+                    "English rewrite of THAT SAME message — never substitute an unrelated "
+                    "template sentence. more_natural_option must also stay anchored in the "
+                    "learner's actual words, offered as a slightly more natural or polished "
+                    "alternative phrasing of the same idea. "
+                    "Never reply with generic filler such as 'No major grammar issue'. Even when "
+                    "the grammar is correct, comment on spoken naturalness, fit with the "
+                    "scenario, or clarity, and suggest one concrete way to sound more like a "
+                    "native speaker in this situation. "
+                    "Keep issue, why, score, and score_breakdown internally consistent: a "
+                    "problem you call out in issue must be reflected by a lower matching "
+                    "score_breakdown component, and a turn you praise should score high. "
+                    "Use 中文 explanations for issue and why so the learner can understand easily. "
+                    "不要羞辱用户，不要说用户英语很差；像一位真人外教一样给出具体、可执行、鼓励式的反馈。 "
                     "Return JSON only with keys what_you_said, user_intent, recommended_english, "
                     "issue, why, more_natural_option, score, score_breakdown, and provider. "
                     "recommended_english and more_natural_option must be natural English. "
                     "issue and why should be concise Chinese explanations. "
-                    "score_breakdown must include grammar, expression, fluency, and scenario_fit from 0 to 100. "
+                    "score_breakdown must contain integer fields grammar, naturalness, relevance, "
+                    "and clarity from 0 to 100, and score must be the realistic overall "
+                    "impression that follows from those four numbers — do not default to fixed "
+                    "template values such as 80 or 88 every time. "
+                    "Scoring guidance: Chinese-English mixed input does not have to lower "
+                    "grammar, but naturalness and clarity should reasonably drop; a reply that "
+                    "drifts from the scenario should lower relevance; Chinglish or unnatural "
+                    "collocations should lower naturalness. "
                     "provider should be 'llm'."
                 ),
             ),
@@ -195,14 +246,14 @@ def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
             "content": (
                 f"Scenario id: {request.scenario_id}\n"
                 f"Previous conversation for context only:\n{history}\n"
-                f"Latest user message to evaluate: {latest_user_message}"
+                f"Latest user message to evaluate — judge ONLY this message: {latest_user_message}"
             ),
         },
     ]
 
 
 def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
-    scenario = get_scenario_prompt_config(request.scenario_id)
+    scenario = mock_service.resolve_scenario(request.session_id, request.scenario_id)
     history = _summary_history(request)
     return [
         {
@@ -212,14 +263,15 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
                 extra_instructions=(
                     "You are an English speaking coach creating a post-session summary. "
                     "Make the summary mostly in Chinese, but keep reusable expressions in English. "
-                    "Assess performance using the scenario goal and scoring focus. "
-                    "If the learner used Chinese-English mixed input multiple times, include a practical "
-                    "中英转换建议 in code_switching_advice. "
+                    "Assess performance using the scenario goal, the story the learner practiced, "
+                    "and the scoring focus. "
+                    "If the learner used Chinese-English mixed input multiple times, include a "
+                    "practical 中英转换建议 in code_switching_advice. "
                     "Return JSON only with keys summary, strengths, repeated_issues, "
                     "better_expressions, scenario_completion, next_practice_focus, "
-                    "code_switching_advice, and scores. "
+                    "code_switching_advice, scores, and provider. "
                     "scores must include grammar, expression, fluency, scenario_completion, "
-                    "and overall from 0 to 100."
+                    "and overall from 0 to 100. provider should be 'llm'."
                 ),
             ),
         },
@@ -262,7 +314,7 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
     if not isinstance(data, dict):
         raise ValueError("Feedback must be a JSON object.")
     if "what_you_said" in data:
-        breakdown = data.get("score_breakdown", {})
+        score = int(data["score"])
         return FeedbackResponse(
             what_you_said=str(data["what_you_said"]),
             user_intent=str(data["user_intent"]),
@@ -270,14 +322,9 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
             issue=str(data["issue"]),
             why=str(data["why"]),
             more_natural_option=str(data["more_natural_option"]),
-            score=int(data["score"]),
-            score_breakdown=FeedbackScoreBreakdown(
-                grammar=int(breakdown["grammar"]),
-                expression=int(breakdown["expression"]),
-                fluency=int(breakdown["fluency"]),
-                scenario_fit=int(breakdown["scenario_fit"]),
-            ),
-            provider=str(data.get("provider", "llm")),
+            score=score,
+            score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
+            provider="llm",
             corrected_sentence=str(data["recommended_english"]),
             better_expression=str(data["more_natural_option"]),
             user_intent_zh=_optional_string(data.get("user_intent")),
@@ -293,18 +340,40 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
         why=_optional_string(data.get("code_switching_tip")) or str(data["issue"]),
         more_natural_option=str(data["better_expression"]),
         score=score,
-        score_breakdown=FeedbackScoreBreakdown(
-            grammar=max(0, min(100, score - 2)),
-            expression=score,
-            fluency=max(0, min(100, score + 2)),
-            scenario_fit=max(0, min(100, score + 4)),
-        ),
-        provider=str(data.get("provider", "llm")),
+        score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
+        provider="llm",
         corrected_sentence=str(data["corrected_sentence"]),
         better_expression=str(data["better_expression"]),
         user_intent_zh=_optional_string(data.get("user_intent_zh")),
         code_switching_tip=_optional_string(data.get("code_switching_tip")),
     )
+
+
+def _score_breakdown_from_data(breakdown: Any, fallback_score: int) -> FeedbackScoreBreakdown:
+    """Build a FeedbackScoreBreakdown from LLM output.
+
+    Accepts the current grammar/naturalness/relevance/clarity keys, but also
+    tolerates older or slightly different key names so a model that has not
+    perfectly absorbed the new prompt still produces a usable breakdown.
+    """
+    source = breakdown if isinstance(breakdown, dict) else {}
+
+    def pick(*keys: str) -> int:
+        for key in keys:
+            if key in source:
+                return _clamp_breakdown_value(source[key])
+        return _clamp_breakdown_value(fallback_score)
+
+    return FeedbackScoreBreakdown(
+        grammar=pick("grammar"),
+        naturalness=pick("naturalness", "expression", "fluency"),
+        relevance=pick("relevance", "scenario_fit", "scenario_completion"),
+        clarity=pick("clarity", "fluency", "expression"),
+    )
+
+
+def _clamp_breakdown_value(value: Any) -> int:
+    return max(0, min(100, int(value)))
 
 
 def _string_list(value: Any) -> list[str]:
@@ -342,12 +411,15 @@ def _latest_user_message(request: ChatRequest) -> str:
     return ""
 
 
-def _scenario_context(scenario: ScenarioPromptConfig, extra_instructions: str) -> str:
+def _scenario_context(scenario: Scenario, extra_instructions: str) -> str:
+    scoring_focus = get_scenario_prompt_config(scenario.scenario_id).scoring_focus
     return (
         "You are an English speaking practice partner for AnytimeSpeak.\n"
-        f"Scenario: {scenario.title_en} / {scenario.title_zh}\n"
+        f"Scenario: {scenario.title} / {scenario.title_zh}\n"
         f"Canonical scenario id: {scenario.scenario_id}\n"
-        f"Scenario story: {scenario.story_intro}\n"
+        f"Story the learner sees (Chinese): {scenario.story_intro_zh}\n"
+        f"Story the learner sees (English): {scenario.story_intro_en}\n"
+        f"Opening line already shown to the learner: {scenario.opening_message}\n"
         f"AI role: {scenario.ai_role}\n"
         f"User role: {scenario.user_role}\n"
         f"Practice goal: {scenario.goal}\n"
@@ -355,7 +427,7 @@ def _scenario_context(scenario: ScenarioPromptConfig, extra_instructions: str) -
         f"Conversation style: {scenario.conversation_style}\n"
         f"Feedback focus: {_bullets(scenario.feedback_focus)}\n"
         f"Useful expressions: {_bullets(scenario.useful_expressions)}\n"
-        f"Scoring focus: {_bullets(scenario.scoring_focus)}\n"
+        f"Scoring focus: {_bullets(scoring_focus)}\n"
         "Code-switching policy: Chinese-English mixed input is allowed. "
         "Treat it as a low-pressure speaking bridge, infer the learner's intent, "
         "and guide them toward natural English.\n"

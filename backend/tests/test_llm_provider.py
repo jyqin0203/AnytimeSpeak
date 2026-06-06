@@ -52,7 +52,8 @@ def test_feedback_falls_back_to_mock_when_llm_call_fails(monkeypatch: pytest.Mon
     assert response.corrected_sentence == (
         "I graduated last year and I was responsible for making the report."
     )
-    assert "simple past" in response.issue.lower()
+    assert "i am graduated" in response.issue.lower()
+    assert "i graduated" in response.issue.lower()
 
 
 def test_llm_provider_uses_openai_api_key_env(monkeypatch: pytest.MonkeyPatch):
@@ -201,7 +202,8 @@ def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
     assert "Previous conversation" in prompt_text
     assert "Latest user message: 我想 check in early." in prompt_text
     assert "Chinese-English mixed input" in prompt_text
-    assert "continue the conversation naturally" in prompt_text
+    assert "ask exactly one specific clarifying question" in prompt_text
+    assert "gently steer the conversation back" in prompt_text
 
 
 def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanations():
@@ -219,10 +221,11 @@ def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanati
     prompt_text = "\n".join(message["content"] for message in messages)
 
     assert "Team lead" in prompt_text
-    assert "Only evaluate the latest user message" in prompt_text
+    assert "Base your analysis strictly on the latest user message" in prompt_text
     assert "This older turn should not be graded" in prompt_text
     assert "what_you_said" in prompt_text
     assert "recommended_english" in prompt_text
+    assert "score_breakdown must contain integer fields grammar, naturalness, relevance" in prompt_text
     assert "中文" in prompt_text
     assert "不要羞辱用户" in prompt_text
 

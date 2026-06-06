@@ -23,7 +23,7 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 
 ## Current Status
 
-The project includes a mock-first MVP practice loop: scenario selection, session-based role-play chat, latest-turn feedback, post-session summary, scoring, browser speech input/playback, user recording replay, and text input fallback. The backend keeps demo sessions in memory and falls back to deterministic mock coaching when no LLM key is configured.
+The project includes a mock-first MVP practice loop: scenario selection with static story seeds (each scenario ships at least three hand-written story intros, randomly selected per session or pinned via `story_seed_id`), session-based role-play chat, latest-turn feedback with a `grammar`/`naturalness`/`relevance`/`clarity` score breakdown, post-session summary, scoring, browser speech input/playback, user recording replay, and text input fallback. The UI is Chinese-first for instructions and feedback labels while keeping practice content, AI role-play replies, and recommended English expressions in English. The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching — every feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key.
 
 ## Local Development
 

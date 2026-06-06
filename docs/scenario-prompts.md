@@ -27,6 +27,7 @@ level: recommended learner level
 aiRole: role the assistant should play
 userRole: role the learner should play
 goal: practice objective shown to the user and included in the prompt
+storySeeds: at least three static story-intro variants (see "Story Seeds" below)
 openingLine: first AI message
 conversationStyle: tone, pace, and interaction rules
 feedbackFocus: grammar, expression, fluency, and scenario-specific priorities
@@ -35,6 +36,14 @@ sampleAiReply: example role-play response
 sampleCorrection: example correction object or feedback block
 scoringFocus: scoring criteria for post-session summary
 ```
+
+## Story Seeds
+
+Each scenario ships with at least three static, hand-written story seeds (`story_seed_id`, `story_intro_zh`, `story_intro_en`, `opening_message`) instead of asking an LLM to invent a new setting per session. This keeps the practice context reproducible for demos and avoids surfacing inconsistent or low-quality scenario framing.
+
+- `POST /api/sessions` randomly selects one seed from the scenario's `story_seeds` when the request omits `story_seed_id`, and uses the exact requested seed when `story_seed_id` is provided (used by the deterministic tests and by any "replay this story" UI affordance).
+- The selected seed's `story_seed_id`, `story_intro_zh`, `story_intro_en`, and `opening_message` are echoed back on the session response and stored on the in-memory `PracticeSession` so later turns can stay grounded in the same story.
+- The frontend renders `story_intro_zh` as the primary text and `story_intro_en` as a smaller secondary line, matching the Chinese-first UI direction for this product.
 
 ## Shared Role-Play Prompt Template
 
@@ -79,6 +88,8 @@ summaryScores:
   scenarioCompletion: 0-100
   overall: 0-100
 ```
+
+`POST /api/feedback` evaluates only the latest user message (earlier turns are context, never re-graded) and returns `what_you_said`, `user_intent`, `recommended_english`, `issue`, `why`, `more_natural_option`, `score`, a `score_breakdown` object with integer `grammar`, `naturalness`, `relevance`, and `clarity` fields, and a `provider` string (`"llm"` or `"mock"`). The `provider` field lets the frontend show whether a turn's feedback came from a live model call or the deterministic local fallback — it never carries the API key or raw provider error text, only the mode name.
 
 ## Scenario 1: Interview / 面试
 
@@ -512,6 +523,8 @@ Session summary:
   - Scenario completion: 0-100
   - Overall: weighted score using grammar 25%, expression 25%, fluency 20%, scenario completion 30%.
 ```
+
+The summary response also returns a `provider` field (`"llm"` or `"mock"`) so the frontend can show a "由 LLM 生成" / "本地 fallback 生成" badge next to the overall score, mirroring the per-turn feedback `provider` field.
 
 ## Prompt Implementation Notes
 

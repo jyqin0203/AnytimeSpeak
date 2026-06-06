@@ -1,6 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
-  createLocalFeedback,
   createLocalReply,
   createLocalSummary,
   fetchScenarios,
@@ -31,6 +30,7 @@ function App() {
   const [selected, setSelected] = useState(localScenarios[0]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [feedbackStatus, setFeedbackStatus] = useState<AsyncState>("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SessionSummary>(() => createLocalSummary([], []));
   const [input, setInput] = useState("");
@@ -38,7 +38,7 @@ function App() {
   const [scenarioStatus, setScenarioStatus] = useState<AsyncState>("loading");
   const [sendStatus, setSendStatus] = useState<AsyncState>("idle");
   const [summaryStatus, setSummaryStatus] = useState<AsyncState>("idle");
-  const [statusText, setStatusText] = useState("正在连接后端 mock coaching APIs...");
+  const [statusText, setStatusText] = useState("正在连接练习服务...");
   const [voiceRecordings, setVoiceRecordings] = useState<Record<number, string>>({});
   const voiceRecordingsRef = useRef<Record<number, string>>({});
 
@@ -55,7 +55,7 @@ function App() {
 
   const loadScenarios = async () => {
     setScenarioStatus("loading");
-    setStatusText("正在连接后端 mock coaching APIs...");
+    setStatusText("正在连接练习服务...");
 
     try {
       const backendScenarios = await fetchScenarios();
@@ -63,13 +63,13 @@ function App() {
       setSelected((current) => backendScenarios.find((scenario) => scenario.id === current.id) ?? backendScenarios[0]);
       setSource("backend");
       setScenarioStatus("idle");
-      setStatusText("已连接后端 mock coaching APIs。");
+      setStatusText("已连接练习服务，可以开始场景练习。");
     } catch {
       setScenarios(localScenarios);
       setSelected((current) => localScenarios.find((scenario) => scenario.id === current.id) ?? localScenarios[0]);
       setSource("fallback");
       setScenarioStatus("error");
-      setStatusText("后端暂不可用，已切换到前端本地 mock fallback。");
+      setStatusText("练习服务暂不可用，已切换到本地练习模式。");
     }
   };
 
@@ -77,6 +77,7 @@ function App() {
     setSelected(scenario);
     setMessages([{ id: 1, sender: "ai", text: scenario.openingLine }]);
     setFeedback([]);
+    setFeedbackStatus("idle");
     setSessionId(null);
     setSummary(createLocalSummary([], []));
     Object.values(voiceRecordingsRef.current).forEach((url) => URL.revokeObjectURL(url));
@@ -91,16 +92,18 @@ function App() {
         setSessionId(session.sessionId);
         setSelected((current) => ({
           ...current,
-          storyIntro: session.storyIntro,
+          storySeedId: session.storySeedId,
+          storyIntroZh: session.storyIntroZh,
+          storyIntroEn: session.storyIntroEn,
           openingLine: session.openingMessage,
         }));
         setMessages([{ id: 1, sender: "ai", text: session.openingMessage }]);
         setSource("backend");
-        setStatusText("已开始 session-based 场景练习。");
+        setStatusText("已根据本轮场景故事开始练习。");
       })
       .catch(() => {
         setSource("fallback");
-        setStatusText("后端 session 暂不可用，已使用前端本地 mock fallback。");
+        setStatusText("练习会话暂时连不上后端，已使用本地模式继续。");
       });
   };
 
@@ -117,6 +120,7 @@ function App() {
       setMessages(nextMessages);
       setInput("");
       setSendStatus("loading");
+      setFeedbackStatus("loading");
       if (recording) {
         setVoiceRecordings((current) => {
           const next = { ...current, [id]: recording.url };
@@ -125,22 +129,35 @@ function App() {
         });
       }
 
-      try {
-        const [reply, turnFeedback] = await Promise.all([
-          sendChatMessage(selected, sessionId, conversationHistory, userMessage),
-          fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage),
-        ]);
-        setMessages([...nextMessages, reply]);
-        setFeedback((current) => [...current, turnFeedback]);
+      const [replyResult, feedbackResult] = await Promise.allSettled([
+        sendChatMessage(selected, sessionId, conversationHistory, userMessage),
+        fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage),
+      ]);
+
+      const reply =
+        replyResult.status === "fulfilled" ? replyResult.value : createLocalReply(selected, nextMessages);
+      setMessages([...nextMessages, reply]);
+
+      if (feedbackResult.status === "fulfilled") {
+        setFeedback((current) => [...current, feedbackResult.value]);
+        setFeedbackStatus("idle");
+      } else {
+        // Never keep showing the previous turn's feedback when this turn failed.
+        setFeedbackStatus("error");
+      }
+
+      if (replyResult.status === "fulfilled" && feedbackResult.status === "fulfilled") {
         setSource("backend");
         setSendStatus("idle");
-        setStatusText("本轮 AI 回复和即时反馈来自后端 mock API。");
-      } catch {
-        setMessages([...nextMessages, createLocalReply(selected, nextMessages)]);
-        setFeedback((current) => [...current, createLocalFeedback(text, id)]);
+        setStatusText("本轮 AI 回复和即时反馈均来自练习服务。");
+      } else if (replyResult.status === "fulfilled") {
+        setSource("backend");
+        setSendStatus("idle");
+        setStatusText("本轮 AI 回复已生成，即时反馈本轮暂时不可用，可继续对话。");
+      } else {
         setSource("fallback");
         setSendStatus("error");
-        setStatusText("后端请求失败，本轮已使用前端本地 mock fallback。");
+        setStatusText("练习服务请求失败，本轮对话已使用本地模式继续。");
       }
     },
     [messages, selected, sendStatus, sessionId],
@@ -167,12 +184,12 @@ function App() {
       setSummary(backendSummary);
       setSource("backend");
       setSummaryStatus("idle");
-      setStatusText("课后总结和评分来自后端 mock API。");
+      setStatusText("课后总结和评分来自练习服务。");
     } catch {
       setSummary(fallbackSummary);
       setSource("fallback");
       setSummaryStatus("error");
-      setStatusText("后端总结请求失败，已展示前端本地 mock fallback。");
+      setStatusText("课后总结请求失败，已展示本地练习模式生成的总结。");
     }
   };
 
@@ -218,6 +235,7 @@ function App() {
           messages={messages}
           voiceRecordings={voiceRecordings}
           feedback={feedback}
+          feedbackStatus={feedbackStatus}
           sessionId={sessionId}
           input={input}
           source={source}
@@ -249,7 +267,7 @@ function Home({ onStart, source, statusText }: { onStart: () => void; source: So
   return (
     <section className="landing-grid page-section">
       <div className="hero-copy">
-        <span className="eyebrow">{source === "backend" ? "Backend mock 已连接" : "Fallback mock 可稳定录屏"}</span>
+        <span className="eyebrow">{source === "backend" ? "已连接练习服务" : "本地练习模式 · 离线也能练"}</span>
         <h1>随时开口练英语</h1>
         <p className="product-positioning">AnytimeSpeak · AI English Speaking Coach</p>
         <p className="hero-description">从真实场景进入对话，边练边看语法和表达建议，结束后获得一份清晰的口语能力总结。</p>
@@ -348,7 +366,8 @@ function Scenarios({
               </div>
               <h3>{scenario.title}</h3>
               <p>{scenario.description}</p>
-              <p className="scenario-story">{scenario.storyIntro}</p>
+              <p className="scenario-story">{scenario.storyIntroZh}</p>
+              <p className="scenario-story-en">{scenario.storyIntroEn}</p>
               <TagList items={scenario.focus} />
               <dl>
                 <div>
@@ -382,6 +401,7 @@ function Practice({
   messages,
   voiceRecordings,
   feedback,
+  feedbackStatus,
   sessionId,
   input,
   source,
@@ -397,6 +417,7 @@ function Practice({
   messages: Message[];
   voiceRecordings: Record<number, string>;
   feedback: Feedback[];
+  feedbackStatus: AsyncState;
   sessionId: string | null;
   input: string;
   source: SourceState;
@@ -485,7 +506,8 @@ function Practice({
         <p>{scenario.description}</p>
         <div className="story-intro">
           <span>情境前言</span>
-          <p>{scenario.storyIntro}</p>
+          <p>{scenario.storyIntroZh}</p>
+          <p className="story-intro-en">{scenario.storyIntroEn}</p>
         </div>
         <dl>
           <div>
@@ -519,7 +541,7 @@ function Practice({
         <div className="panel-title">
           <div>
             <h2>对话练习</h2>
-            <p>{sessionId ? `Session: ${sessionId}` : "正在准备 session；后端不可用时自动 fallback。"}</p>
+            <p>{sessionId ? `会话编号：${sessionId}` : "正在准备本轮练习会话，练习服务不可用时将自动切换到本地模式。"}</p>
           </div>
           <button className="danger-button" type="button" onClick={onEnd} disabled={sendStatus === "loading"}>
             {sendStatus === "loading" ? "请稍等" : "结束练习"}
@@ -527,7 +549,7 @@ function Practice({
         </div>
         <StatusBanner status={sendStatus} source={source} text={statusText} />
         <div className="practice-progress">
-          <span>当前场景：{scenario.englishTitle}</span>
+          <span>当前场景：{scenario.title}</span>
           <div aria-hidden="true">
             <span style={{ width: `${Math.min(100, messages.length * 14)}%` }} />
           </div>
@@ -592,9 +614,19 @@ function Practice({
         </div>
         <div className="panel-title compact">
           <h2>即时反馈</h2>
-          <p>当前输入、推荐英文、问题原因、自然表达和单轮分数。</p>
+          <p>只展示最新一轮：你刚才说的是、推荐英文表达、原因说明和本轮评分。</p>
         </div>
-        {feedback.length === 0 ? (
+        {feedbackStatus === "loading" ? (
+          <div className="empty-state">
+            <strong>正在分析你的表达...</strong>
+            <p>正在结合当前场景故事生成本轮反馈，请稍候。</p>
+          </div>
+        ) : feedbackStatus === "error" ? (
+          <div className="empty-state error">
+            <strong>本轮反馈暂时不可用</strong>
+            <p>本轮反馈生成失败，这里不会展示历史反馈。请继续对话，下一轮会重新尝试。</p>
+          </div>
+        ) : feedback.length === 0 ? (
           <div className="empty-state">
             <strong>还没有反馈</strong>
             <p>发送一句后，这里只展示最新一轮的推荐英文、问题原因和更自然表达。</p>
@@ -605,24 +637,40 @@ function Practice({
               <article className="feedback-card" key={latestFeedback.id}>
                 <div className="score-pill">{latestFeedback.score}</div>
                 <div>
-                  <span>What you said</span>
+                  <span>你刚才说的是</span>
                   <p>{latestFeedback.whatYouSaid}</p>
                 </div>
                 <div>
-                  <span>Recommended English</span>
+                  <span>你想表达的是</span>
+                  <p>{latestFeedback.userIntent}</p>
+                </div>
+                <div>
+                  <span>推荐英文表达</span>
                   <p className="english-suggestion">{latestFeedback.recommendedEnglish}</p>
                 </div>
                 <div>
-                  <span>Issue</span>
-                  <p>{latestFeedback.issue}</p>
+                  <span>为什么这样更自然</span>
+                  <p>主要问题：{latestFeedback.issue}</p>
+                  <p>为什么：{latestFeedback.why}</p>
                 </div>
                 <div>
-                  <span>Why</span>
-                  <p>{latestFeedback.why}</p>
-                </div>
-                <div>
-                  <span>More natural option</span>
+                  <span>更自然的说法</span>
                   <p className="english-suggestion">{latestFeedback.moreNaturalOption}</p>
+                </div>
+                <div className="score-breakdown">
+                  <div className="score-breakdown-head">
+                    <span>本轮评分</span>
+                    <span className={`provider-badge ${latestFeedback.provider === "llm" ? "llm" : "fallback"}`}>
+                      {latestFeedback.provider === "llm" ? "由 LLM 生成" : "本地 Mock / Fallback"}
+                    </span>
+                  </div>
+                  <div className="score-breakdown-grid">
+                    {Object.entries(latestFeedback.scoreBreakdown).map(([label, value]) => (
+                      <span key={label}>
+                        {label} {value}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </article>
             )}
@@ -655,7 +703,12 @@ function Summary({
       <div className="summary-hero">
         <span>{scenario.title} · 课后总结</span>
         <h1>{summary.scores.综合}</h1>
-        <p>Overall feedback：{status === "loading" ? "正在向后端生成课后总结和评分..." : summary.overallPerformance}</p>
+        <p className="summary-provider-line">
+          总体评价：{status === "loading" ? "正在生成课后总结和评分..." : summary.overallPerformance}
+          <span className={`provider-badge ${summary.provider === "llm" ? "llm" : "fallback"}`}>
+            {summary.provider === "llm" ? "由 LLM 生成" : "本地 fallback 生成"}
+          </span>
+        </p>
         <StatusBanner status={status} source={source} text={statusText} />
         <div className="summary-actions">
           <button className="primary-button" type="button" onClick={onAgain}>
@@ -703,7 +756,7 @@ function StatusBanner({
 }) {
   return (
     <div className={`status-banner ${status} ${source}`} role="status">
-      <span>{status === "loading" ? "连接中" : source === "backend" ? "后端 mock" : "本地 fallback"}</span>
+      <span>{status === "loading" ? "连接中" : source === "backend" ? "练习服务" : "本地练习模式"}</span>
       <p>{text}</p>
       {onRetry && (
         <button className="secondary-button compact-button" type="button" onClick={onRetry}>

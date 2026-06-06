@@ -1,4 +1,13 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class StorySeed:
+    seed_id: str
+    label_zh: str
+    story_intro_zh: str
+    story_intro_en: str
+    opening_message: str
 
 
 @dataclass(frozen=True)
@@ -10,12 +19,15 @@ class ScenarioPromptConfig:
     ai_role: str
     user_role: str
     goal: str
-    story_intro: str
-    opening_message: str
     conversation_style: str
     feedback_focus: list[str]
     useful_expressions: list[str]
     scoring_focus: list[str]
+    story_seeds: list[StorySeed] = field(default_factory=list)
+
+    @property
+    def default_story_seed(self) -> StorySeed:
+        return self.story_seeds[0]
 
 
 SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
@@ -30,16 +42,6 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Give a clear self-introduction, explain experience with concrete "
             "examples, answer interview questions, and ask professional follow-up "
             "questions."
-        ),
-        story_intro=(
-            "You are waiting in a video interview lobby for a junior role. "
-            "The hiring manager has your resume and wants to hear a clear, "
-            "confident story about your background, one useful project, and why "
-            "this role matters to you."
-        ),
-        opening_message=(
-            "Hi, thanks for joining today. Could you briefly introduce yourself "
-            "and tell me why you are interested in this role?"
         ),
         conversation_style=(
             "Professional, supportive, realistic for an interview, and focused "
@@ -63,6 +65,64 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "answer organization, smooth transitions, and ability to expand beyond one sentence",
             "introduces background, explains experience, answers questions, and asks a relevant question",
         ],
+        story_seeds=[
+            StorySeed(
+                seed_id="interview_first_round",
+                label_zh="线上初面",
+                story_intro_zh=(
+                    "你正在参加一家创业公司的第一轮线上面试。招聘经理刚打开摄像头，"
+                    "准备从你的背景和动机开始了解你，整场大约 20 分钟，氛围比较轻松。"
+                ),
+                story_intro_en=(
+                    "You are joining the first-round video interview for a startup. "
+                    "The hiring manager has just turned on the camera and wants to "
+                    "start with your background and motivation in a relaxed "
+                    "twenty-minute conversation."
+                ),
+                opening_message=(
+                    "Hi, thanks for joining today. Could you briefly introduce "
+                    "yourself and tell me why you are interested in this role?"
+                ),
+            ),
+            StorySeed(
+                seed_id="interview_project_dive",
+                label_zh="项目经历追问",
+                story_intro_zh=(
+                    "面试已经进入第二轮，招聘经理看过你简历上的一个项目，想让你具体讲讲"
+                    "你在其中做了什么、遇到了什么挑战，以及最终的结果。"
+                ),
+                story_intro_en=(
+                    "You are now in a second-round interview. The hiring manager has "
+                    "read about one project on your resume and wants you to walk "
+                    "through your specific role, the challenge you faced, and the "
+                    "result."
+                ),
+                opening_message=(
+                    "Thanks for joining the second round. I noticed a project on "
+                    "your resume — could you walk me through what you did and what "
+                    "the result was?"
+                ),
+            ),
+            StorySeed(
+                seed_id="interview_internship",
+                label_zh="实习岗位面试",
+                story_intro_zh=(
+                    "你正在面试一个暑期实习岗位，对方是带教导师。面试官想知道你目前的"
+                    "学习方向、能投入的时间，以及你希望从这次实习中获得什么。"
+                ),
+                story_intro_en=(
+                    "You are interviewing for a summer internship with your "
+                    "potential mentor. The interviewer wants to know your current "
+                    "focus, the time you can commit, and what you hope to gain from "
+                    "the internship."
+                ),
+                opening_message=(
+                    "Hi, welcome! Could you tell me a bit about what you are "
+                    "currently studying and why this internship caught your "
+                    "interest?"
+                ),
+            ),
+        ],
     ),
     "ordering_food": ScenarioPromptConfig(
         scenario_id="ordering_food",
@@ -75,12 +135,6 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Order food and drinks clearly, ask for recommendations, express "
             "preferences politely, and confirm the order."
         ),
-        story_intro=(
-            "You have just walked into a busy cafe during lunch. The server is "
-            "friendly but the line is moving quickly, so you need to ask about "
-            "recommendations, explain preferences, and confirm your order politely."
-        ),
-        opening_message="Welcome! Are you ready to order, or would you like a few recommendations first?",
         conversation_style=(
             "Friendly, practical, patient, and focused on completing a restaurant "
             "or cafe order with short natural phrases."
@@ -104,6 +158,51 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "complete order flow and understandable short responses",
             "orders an item, states a preference, asks or answers a menu question, and confirms the order",
         ],
+        story_seeds=[
+            StorySeed(
+                seed_id="ordering_cafe",
+                label_zh="咖啡店点单",
+                story_intro_zh=(
+                    "上午十点，你走进公司楼下的咖啡店准备点一杯饮品。店员很热情，队伍"
+                    "不算长，你可以慢慢说明你想要的口味和分量。"
+                ),
+                story_intro_en=(
+                    "At ten in the morning, you walk into the cafe near your office "
+                    "to order a drink. The barista is friendly and the line is "
+                    "short, so you can take your time describing your preferred "
+                    "flavor and size."
+                ),
+                opening_message="Good morning! What can I get started for you today?",
+            ),
+            StorySeed(
+                seed_id="ordering_restaurant_recommend",
+                label_zh="餐厅询问推荐",
+                story_intro_zh=(
+                    "你和朋友来到一家没吃过的餐厅，菜单上的选项有点多，你决定向服务员"
+                    "询问推荐，再根据口味做出选择。"
+                ),
+                story_intro_en=(
+                    "You and a friend arrive at a restaurant you have never tried "
+                    "before. The menu has many options, so you decide to ask the "
+                    "server for recommendations before deciding what to order."
+                ),
+                opening_message="Welcome! Are you ready to order, or would you like a few recommendations first?",
+            ),
+            StorySeed(
+                seed_id="ordering_takeout",
+                label_zh="外卖 / 打包场景",
+                story_intro_zh=(
+                    "你赶时间，打算点一份外卖带走。你需要快速说明想要什么、有什么忌口，"
+                    "并确认打包和等待时间。"
+                ),
+                story_intro_en=(
+                    "You are short on time and want to order food to go. You need "
+                    "to quickly explain what you want, mention any dietary "
+                    "restrictions, and confirm the packaging and wait time."
+                ),
+                opening_message="Hi there, are you looking to order something to go?",
+            ),
+        ],
     ),
     "meeting": ScenarioPromptConfig(
         scenario_id="meeting",
@@ -116,12 +215,6 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Give a clear progress update, explain blockers, ask for clarification, "
             "agree on action items, and confirm next steps."
         ),
-        story_intro=(
-            "You are joining a short team stand-up with your team lead. Everyone "
-            "needs a concise update, a clear blocker if you have one, and a next "
-            "step that can be followed up after the meeting."
-        ),
-        opening_message="Let's start with your update. What progress have you made since our last meeting?",
         conversation_style=(
             "Work-focused, concise, collaborative, solution-oriented, and realistic "
             "for a workplace meeting."
@@ -145,6 +238,51 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "progress, blocker, and next-step structure",
             "provides progress, identifies a blocker, asks or answers clarification, and confirms next steps",
         ],
+        story_seeds=[
+            StorySeed(
+                seed_id="meeting_standup",
+                label_zh="Stand-up 汇报进度",
+                story_intro_zh=(
+                    "现在是每天的站会时间，团队负责人正依次询问每个人的进展。轮到你时，"
+                    "需要简洁说明你昨天完成了什么、今天打算做什么。"
+                ),
+                story_intro_en=(
+                    "It is time for the daily stand-up, and the team lead is going "
+                    "around asking for updates. When it is your turn, you need to "
+                    "briefly share what you finished yesterday and what you plan to "
+                    "do today."
+                ),
+                opening_message="Let's start with your update. What progress have you made since our last stand-up?",
+            ),
+            StorySeed(
+                seed_id="meeting_project_sync",
+                label_zh="项目同步会",
+                story_intro_zh=(
+                    "这是一个跨团队的项目同步会，团队负责人想了解整体进度，并确认接下来"
+                    "一周需要协调的事项。"
+                ),
+                story_intro_en=(
+                    "This is a cross-team project sync meeting. The team lead wants "
+                    "an overview of the current progress and to confirm what needs "
+                    "to be coordinated for the coming week."
+                ),
+                opening_message="Thanks for joining the sync. Could you give us a quick overview of where the project stands right now?",
+            ),
+            StorySeed(
+                seed_id="meeting_raise_blocker",
+                label_zh="提出 Blocker",
+                story_intro_zh=(
+                    "你这周遇到了一个卡住进度的问题，需要在小组会议上向团队负责人说明"
+                    "这个 blocker，并讨论可能的解决办法。"
+                ),
+                story_intro_en=(
+                    "You ran into an issue this week that is blocking your "
+                    "progress, and you need to explain this blocker to your team "
+                    "lead in the team meeting and discuss possible solutions."
+                ),
+                opening_message="Before we move on, is there anything blocking your work this week that we should talk through?",
+            ),
+        ],
     ),
     "travel": ScenarioPromptConfig(
         scenario_id="travel",
@@ -157,12 +295,6 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Ask for directions or travel information, check in or confirm a "
             "reservation, explain simple travel problems, and ask for help politely."
         ),
-        story_intro=(
-            "You are traveling in an unfamiliar city and need practical help from "
-            "a service desk or local guide. Keep details fictional, explain the "
-            "travel task clearly, and confirm the next useful step."
-        ),
-        opening_message="Hello! How can I help you with your trip today?",
         conversation_style=(
             "Clear, patient, and practical, with realistic travel vocabulary and "
             "one travel task at a time."
@@ -185,6 +317,51 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "understandable details and smooth responses to service questions",
             "states the travel need, provides required information, asks a useful question, and confirms the result",
         ],
+        story_seeds=[
+            StorySeed(
+                seed_id="travel_hotel_checkin",
+                label_zh="酒店入住",
+                story_intro_zh=(
+                    "你刚抵达酒店，比预计的时间早到了一些。前台工作人员正在核对你的"
+                    "预订信息，你需要说明情况并询问能否提前办理入住。"
+                ),
+                story_intro_en=(
+                    "You have just arrived at the hotel a bit earlier than "
+                    "expected. The front desk staff is checking your reservation, "
+                    "and you need to explain the situation and ask about early "
+                    "check-in."
+                ),
+                opening_message="Hello! Welcome to our hotel. Could I have your name and reservation details, please?",
+            ),
+            StorySeed(
+                seed_id="travel_directions",
+                label_zh="问路",
+                story_intro_zh=(
+                    "你在一个陌生的城市迷了路，看到路边有一位看起来很热心的当地人，"
+                    "于是上前询问怎么去你要去的地方。"
+                ),
+                story_intro_en=(
+                    "You are lost in an unfamiliar city and notice a "
+                    "friendly-looking local nearby, so you approach them to ask how "
+                    "to get to the place you are heading."
+                ),
+                opening_message="Hi, excuse me — you look like you might know this area. Where are you trying to go?",
+            ),
+            StorySeed(
+                seed_id="travel_airport",
+                label_zh="机场 / 车站沟通",
+                story_intro_zh=(
+                    "你在机场遇到了航班延误的问题，需要找工作人员了解最新情况，并确认"
+                    "接下来该怎么安排。"
+                ),
+                story_intro_en=(
+                    "You run into a flight delay at the airport and need to find a "
+                    "staff member to understand the latest situation and figure out "
+                    "what to do next."
+                ),
+                opening_message="Hello, I understand you have a question about your flight. How can I help you today?",
+            ),
+        ],
     ),
     "daily_conversation": ScenarioPromptConfig(
         scenario_id="daily_conversation",
@@ -197,12 +374,6 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Build comfort with casual English conversation, describe daily life, "
             "share preferences, and ask simple follow-up questions."
         ),
-        story_intro=(
-            "You are chatting with a friendly English-speaking partner after a "
-            "normal day. The goal is not to perform perfectly, but to share small "
-            "details, respond naturally, and ask simple follow-up questions."
-        ),
-        opening_message="Hi! How's your day going so far?",
         conversation_style=(
             "Casual, friendly, low-pressure, and focused on familiar safe topics."
         ),
@@ -224,6 +395,50 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "response completeness, added details, and conversational flow",
             "answers questions, shares everyday information, asks a follow-up, and keeps the conversation going",
         ],
+        story_seeds=[
+            StorySeed(
+                seed_id="daily_cafe_classmate",
+                label_zh="咖啡馆偶遇同学",
+                story_intro_zh=(
+                    "周六下午，你在常去的咖啡馆里偶遇了一位很久没联系的同学。你们找了"
+                    "张靠窗的桌子坐下，准备聊聊最近的生活。"
+                ),
+                story_intro_en=(
+                    "On a Saturday afternoon, you run into a classmate you have not "
+                    "seen for a while at your favorite cafe. You both sit by the "
+                    "window and start catching up on recent life."
+                ),
+                opening_message="Hey, what a surprise seeing you here! It's been a while — how have you been lately?",
+            ),
+            StorySeed(
+                seed_id="daily_after_class",
+                label_zh="下课后和朋友聊天",
+                story_intro_zh=(
+                    "刚下课，你和朋友一起走出教室，准备去吃午饭。路上你们随意聊起这周"
+                    "的课程、作业和周末的安排。"
+                ),
+                story_intro_en=(
+                    "Class has just ended, and you are walking out with a friend to "
+                    "grab lunch. On the way, you casually chat about this week's "
+                    "classes, homework, and weekend plans."
+                ),
+                opening_message="That class felt pretty long today, right? What are you up to for lunch?",
+            ),
+            StorySeed(
+                seed_id="daily_weekend_plans",
+                label_zh="周末计划闲聊",
+                story_intro_zh=(
+                    "周五晚上，你和朋友通话，随口聊起这个周末打算做什么。气氛很轻松，"
+                    "你们可以谈兴趣爱好、休息计划或者想去的地方。"
+                ),
+                story_intro_en=(
+                    "It is Friday evening, and you are chatting with a friend about "
+                    "weekend plans. The mood is relaxed, and you can talk about "
+                    "hobbies, rest, or places you would like to visit."
+                ),
+                opening_message="Hi! Do you have any plans for the weekend, or are you just going to relax?",
+            ),
+        ],
     ),
 }
 
@@ -243,3 +458,17 @@ def get_scenario_prompt_config(scenario_id: str) -> ScenarioPromptConfig:
 
 def list_scenario_prompt_configs() -> list[ScenarioPromptConfig]:
     return list(SCENARIO_PROMPT_CONFIGS.values())
+
+
+def find_story_seed(scenario_id: str, seed_id: str | None) -> StorySeed | None:
+    if not seed_id:
+        return None
+    config = get_scenario_prompt_config(scenario_id)
+    for seed in config.story_seeds:
+        if seed.seed_id == seed_id:
+            return seed
+    return None
+
+
+def list_story_seeds(scenario_id: str) -> list[StorySeed]:
+    return list(get_scenario_prompt_config(scenario_id).story_seeds)

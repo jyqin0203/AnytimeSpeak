@@ -13,9 +13,9 @@ class ScoreBreakdown(BaseModel):
 
 class FeedbackScoreBreakdown(BaseModel):
     grammar: int = Field(ge=0, le=100)
-    expression: int = Field(ge=0, le=100)
-    fluency: int = Field(ge=0, le=100)
-    scenario_fit: int = Field(ge=0, le=100)
+    naturalness: int = Field(ge=0, le=100)
+    relevance: int = Field(ge=0, le=100)
+    clarity: int = Field(ge=0, le=100)
 
 
 class Scenario(BaseModel):
@@ -27,7 +27,9 @@ class Scenario(BaseModel):
     ai_role: str
     user_role: str
     goal: str
-    story_intro: str
+    story_seed_id: str
+    story_intro_zh: str
+    story_intro_en: str
     opening_line: str
     opening_message: str
     conversation_style: str
@@ -42,13 +44,16 @@ class ChatMessage(BaseModel):
 
 class StartSessionRequest(BaseModel):
     scenario_id: str
+    story_seed_id: str | None = None
 
 
 class PracticeSession(BaseModel):
     session_id: str
     scenario_id: str
     scenario: Scenario
-    story_intro: str
+    story_seed_id: str
+    story_intro_zh: str
+    story_intro_en: str
     opening_message: str
     messages: list[ChatMessage] = Field(default_factory=list)
     created_at: str
@@ -110,3 +115,4 @@ class SummaryResponse(BaseModel):
     next_practice_focus: str
     code_switching_advice: str | None = None
     scores: ScoreBreakdown
+    provider: str = "mock"
