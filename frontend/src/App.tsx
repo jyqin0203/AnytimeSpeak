@@ -1,170 +1,123 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import {
+  createLocalFeedback,
+  createLocalReply,
+  createLocalSummary,
+  fetchScenarios,
+  fetchSessionSummary,
+  fetchTurnFeedback,
+  localScenarios,
+  sendChatMessage,
+  type Feedback,
+  type Message,
+  type Scenario,
+  type SessionSummary,
+} from "./api/coaching";
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary";
-type Sender = "ai" | "user";
-
-type Scenario = {
-  id: string;
-  title: string;
-  englishTitle: string;
-  description: string;
-  aiRole: string;
-  userRole: string;
-  goal: string;
-  level: string;
-  duration: string;
-  focus: string[];
-  openingLine: string;
-  replies: string[];
-};
-
-type Message = { id: number; sender: Sender; text: string };
-type Feedback = { id: number; corrected: string; issue: string; better: string; score: number };
-
-const scenarios: Scenario[] = [
-  {
-    id: "interview",
-    title: "面试沟通",
-    englishTitle: "Interview",
-    description: "练习自我介绍、项目经历和职业动机，回答更自然、更有结构。",
-    aiRole: "招聘经理",
-    userRole: "候选人",
-    goal: "清楚介绍自己，说明经验价值，并提出一个专业追问。",
-    level: "进阶",
-    duration: "8 分钟",
-    focus: ["自我介绍", "STAR 表达", "职业动机"],
-    openingLine:
-      "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?",
-    replies: [
-      "Thanks for sharing that. Can you describe one project where you made a clear impact?",
-      "That sounds useful. What challenge did you face, and how did you handle it?",
-      "Good example. Before we finish, what would you like to know about the team or role?",
-    ],
-  },
-  {
-    id: "food",
-    title: "餐厅点餐",
-    englishTitle: "Ordering Food",
-    description: "从询问推荐到确认偏好，练习礼貌、清楚的日常服务场景表达。",
-    aiRole: "餐厅服务员",
-    userRole: "顾客",
-    goal: "点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
-    level: "入门",
-    duration: "6 分钟",
-    focus: ["礼貌请求", "偏好说明", "订单确认"],
-    openingLine: "Welcome! Are you ready to order, or would you like a few recommendations first?",
-    replies: [
-      "Of course. Our grilled salmon is popular today. Do you have any allergies or preferences?",
-      "Great choice. Would you like that with rice, salad, or roasted vegetables?",
-      "Perfect. I will place that order for you. Would you like anything to drink?",
-    ],
-  },
-  {
-    id: "meeting",
-    title: "会议汇报",
-    englishTitle: "Meeting",
-    description: "练习汇报进展、说明阻塞点、请求支持，并对齐下一步。",
-    aiRole: "团队负责人",
-    userRole: "团队成员",
-    goal: "给出进展更新，说明问题，确认下一步和完成时间。",
-    level: "进阶",
-    duration: "8 分钟",
-    focus: ["进度汇报", "问题说明", "下一步对齐"],
-    openingLine: "Let's start with your update. What progress have you made since our last meeting?",
-    replies: [
-      "Thanks for the update. Is anything blocking the remaining work right now?",
-      "That is clear. What support do you need from the team this week?",
-      "Good. Please confirm the next step and when you expect to finish it.",
-    ],
-  },
-  {
-    id: "travel",
-    title: "旅行求助",
-    englishTitle: "Travel",
-    description: "练习酒店入住、问路、确认预订和解决简单旅行问题。",
-    aiRole: "酒店前台",
-    userRole: "旅行者",
-    goal: "清楚提出需求，确认细节，并礼貌处理旅行中的小问题。",
-    level: "入门",
-    duration: "6 分钟",
-    focus: ["信息确认", "礼貌求助", "问题解决"],
-    openingLine: "Good evening. Welcome to the hotel. How can I help you today?",
-    replies: [
-      "I can help with that. Could you tell me your reservation name and arrival date?",
-      "Thank you. We have your booking. Would you prefer a quiet room or a higher floor?",
-      "No problem. I will update that for you. Is there anything else you need?",
-    ],
-  },
-  {
-    id: "daily",
-    title: "日常闲聊",
-    englishTitle: "Daily Conversation",
-    description: "练习自然开场、回应和延续话题，让英文对话不再卡住。",
-    aiRole: "友好邻居",
-    userRole: "英语学习者",
-    goal: "开启轻松对话，回应自然，并用追问把交流延续下去。",
-    level: "入门",
-    duration: "5 分钟",
-    focus: ["自然回应", "追问技巧", "轻松表达"],
-    openingLine: "Hi there! I do not think we have met before. How is your day going?",
-    replies: [
-      "That sounds nice. What do you usually like to do after work or class?",
-      "Interesting. I have been looking for new ideas. What would you recommend?",
-      "Thanks for sharing. It was nice talking with you. Hope to see you again soon.",
-    ],
-  },
-];
+type SourceState = "backend" | "fallback";
+type AsyncState = "idle" | "loading" | "error";
 
 const features = ["场景化练习", "AI 角色对话", "语法 / 表达反馈", "课后总结评分"];
 const marketNotes = ["先明确场景目标", "对话主线不被反馈打断", "结束后沉淀分项评分与复用表达"];
-const expressions = [
-  "I would like to learn more about...",
-  "Could you clarify what you mean by...?",
-  "My main contribution was...",
-  "I would prefer..., if possible.",
-];
 
 function App() {
   const [view, setView] = useState<View>("home");
-  const [selected, setSelected] = useState(scenarios[0]);
+  const [scenarios, setScenarios] = useState<Scenario[]>(localScenarios);
+  const [selected, setSelected] = useState(localScenarios[0]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [summary, setSummary] = useState<SessionSummary>(() => createLocalSummary([], []));
   const [input, setInput] = useState("");
+  const [source, setSource] = useState<SourceState>("fallback");
+  const [scenarioStatus, setScenarioStatus] = useState<AsyncState>("loading");
+  const [sendStatus, setSendStatus] = useState<AsyncState>("idle");
+  const [summaryStatus, setSummaryStatus] = useState<AsyncState>("idle");
+  const [statusText, setStatusText] = useState("正在连接后端 mock coaching APIs...");
 
-  const scores = useMemo(() => {
-    const avg = feedback.length ? Math.round(feedback.reduce((sum, item) => sum + item.score, 0) / feedback.length) : 82;
-    const turns = messages.filter((message) => message.sender === "user").length;
-    return {
-      语法: Math.min(96, avg + 2),
-      表达: Math.min(94, avg + 4),
-      流畅: turns > 1 ? 86 : 78,
-      完成度: turns > 2 ? 90 : 82,
-      综合: Math.round((avg + 86 + 84 + 88) / 4),
-    };
-  }, [feedback, messages]);
+  useEffect(() => {
+    void loadScenarios();
+  }, []);
+
+  const loadScenarios = async () => {
+    setScenarioStatus("loading");
+    setStatusText("正在连接后端 mock coaching APIs...");
+
+    try {
+      const backendScenarios = await fetchScenarios();
+      setScenarios(backendScenarios);
+      setSelected((current) => backendScenarios.find((scenario) => scenario.id === current.id) ?? backendScenarios[0]);
+      setSource("backend");
+      setScenarioStatus("idle");
+      setStatusText("已连接后端 mock coaching APIs。");
+    } catch {
+      setScenarios(localScenarios);
+      setSelected((current) => localScenarios.find((scenario) => scenario.id === current.id) ?? localScenarios[0]);
+      setSource("fallback");
+      setScenarioStatus("error");
+      setStatusText("后端暂不可用，已切换到前端本地 mock fallback。");
+    }
+  };
 
   const start = (scenario: Scenario) => {
     setSelected(scenario);
     setMessages([{ id: 1, sender: "ai", text: scenario.openingLine }]);
     setFeedback([]);
+    setSummary(createLocalSummary([], []));
+    setSendStatus("idle");
+    setSummaryStatus("idle");
     setInput("");
     setView("practice");
   };
 
-  const send = (event: FormEvent<HTMLFormElement>) => {
+  const send = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = input.trim();
-    if (!text) return;
-    const turn = messages.filter((message) => message.sender === "user").length;
+    if (!text || sendStatus === "loading") return;
+
     const id = Date.now();
-    setMessages((current) => [
-      ...current,
-      { id, sender: "user", text },
-      { id: id + 1, sender: "ai", text: selected.replies[turn % selected.replies.length] },
-    ]);
-    setFeedback((current) => [...current, createFeedback(text, current.length)]);
+    const userMessage: Message = { id, sender: "user", text };
+    const nextMessages = [...messages, userMessage];
+
+    setMessages(nextMessages);
     setInput("");
+    setSendStatus("loading");
+
+    try {
+      const [reply, turnFeedback] = await Promise.all([sendChatMessage(selected, nextMessages), fetchTurnFeedback(selected, userMessage)]);
+      setMessages([...nextMessages, reply]);
+      setFeedback((current) => [...current, turnFeedback]);
+      setSource("backend");
+      setSendStatus("idle");
+      setStatusText("本轮 AI 回复和即时反馈来自后端 mock API。");
+    } catch {
+      setMessages([...nextMessages, createLocalReply(selected, nextMessages)]);
+      setFeedback((current) => [...current, createLocalFeedback(text, id)]);
+      setSource("fallback");
+      setSendStatus("error");
+      setStatusText("后端请求失败，本轮已使用前端本地 mock fallback。");
+    }
+  };
+
+  const endPractice = async () => {
+    const fallbackSummary = createLocalSummary(messages, feedback);
+    setSummary(fallbackSummary);
+    setSummaryStatus("loading");
+    setView("summary");
+
+    try {
+      const backendSummary = await fetchSessionSummary(selected, messages);
+      setSummary(backendSummary);
+      setSource("backend");
+      setSummaryStatus("idle");
+      setStatusText("课后总结和评分来自后端 mock API。");
+    } catch {
+      setSummary(fallbackSummary);
+      setSource("fallback");
+      setSummaryStatus("error");
+      setStatusText("后端总结请求失败，已展示前端本地 mock fallback。");
+    }
   };
 
   return (
@@ -190,32 +143,54 @@ function App() {
         </nav>
       </header>
 
-      {view === "home" && <Home onStart={() => setView("scenarios")} />}
-      {view === "scenarios" && <Scenarios selected={selected} onSelect={setSelected} onStart={start} />}
+      {view === "home" && <Home onStart={() => setView("scenarios")} source={source} statusText={statusText} />}
+      {view === "scenarios" && (
+        <Scenarios
+          selected={selected}
+          scenarios={scenarios}
+          status={scenarioStatus}
+          source={source}
+          statusText={statusText}
+          onRetry={loadScenarios}
+          onSelect={setSelected}
+          onStart={start}
+        />
+      )}
       {view === "practice" && (
         <Practice
           scenario={selected}
           messages={messages}
           feedback={feedback}
           input={input}
+          source={source}
+          statusText={statusText}
+          sendStatus={sendStatus}
           onInput={setInput}
           onSend={send}
-          onEnd={() => setView("summary")}
+          onEnd={endPractice}
           onReset={() => setView("scenarios")}
         />
       )}
       {view === "summary" && (
-        <Summary scenario={selected} scores={scores} feedback={feedback} onAgain={() => start(selected)} onChoose={() => setView("scenarios")} />
+        <Summary
+          scenario={selected}
+          summary={summary}
+          status={summaryStatus}
+          source={source}
+          statusText={statusText}
+          onAgain={() => start(selected)}
+          onChoose={() => setView("scenarios")}
+        />
       )}
     </main>
   );
 }
 
-function Home({ onStart }: { onStart: () => void }) {
+function Home({ onStart, source, statusText }: { onStart: () => void; source: SourceState; statusText: string }) {
   return (
     <section className="landing-grid page-section">
       <div className="hero-copy">
-        <span className="eyebrow">Mock 模式 · 可稳定录屏</span>
+        <span className="eyebrow">{source === "backend" ? "Backend mock 已连接" : "Fallback mock 可稳定录屏"}</span>
         <h1>随时开口练英语</h1>
         <p className="product-positioning">AnytimeSpeak · AI English Speaking Coach</p>
         <p className="hero-description">从真实场景进入对话，边练边看语法和表达建议，结束后获得一份清晰的口语能力总结。</p>
@@ -223,7 +198,7 @@ function Home({ onStart }: { onStart: () => void }) {
           <button className="primary-button" type="button" onClick={onStart}>
             开始练习
           </button>
-          <span>无需后端、无需 API Key</span>
+          <span>{statusText}</span>
         </div>
       </div>
 
@@ -260,10 +235,20 @@ function Home({ onStart }: { onStart: () => void }) {
 
 function Scenarios({
   selected,
+  scenarios,
+  status,
+  source,
+  statusText,
+  onRetry,
   onSelect,
   onStart,
 }: {
   selected: Scenario;
+  scenarios: Scenario[];
+  status: AsyncState;
+  source: SourceState;
+  statusText: string;
+  onRetry: () => void;
   onSelect: (scenario: Scenario) => void;
   onStart: (scenario: Scenario) => void;
 }) {
@@ -289,6 +274,7 @@ function Scenarios({
           <h2>选择练习场景</h2>
           <p>每个卡片都标出 AI 角色、练习目标和重点表达，方便 demo 时快速进入主题。</p>
         </div>
+        <StatusBanner status={status} source={source} text={statusText} onRetry={onRetry} />
         <div className="scenario-grid">
           {scenarios.map((scenario) => (
             <button
@@ -336,6 +322,9 @@ function Practice({
   messages,
   feedback,
   input,
+  source,
+  statusText,
+  sendStatus,
   onInput,
   onSend,
   onEnd,
@@ -345,6 +334,9 @@ function Practice({
   messages: Message[];
   feedback: Feedback[];
   input: string;
+  source: SourceState;
+  statusText: string;
+  sendStatus: AsyncState;
   onInput: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onEnd: () => void;
@@ -383,12 +375,13 @@ function Practice({
         <div className="panel-title">
           <div>
             <h2>对话练习</h2>
-            <p>输入一句英文，查看本地 mock 的 AI 回复和即时反馈。</p>
+            <p>输入一句英文，查看后端 mock 的 AI 回复和即时反馈；后端不可用时自动 fallback。</p>
           </div>
-          <button className="danger-button" type="button" onClick={onEnd}>
-            结束练习
+          <button className="danger-button" type="button" onClick={onEnd} disabled={sendStatus === "loading"}>
+            {sendStatus === "loading" ? "请稍等" : "结束练习"}
           </button>
         </div>
+        <StatusBanner status={sendStatus} source={source} text={statusText} />
         <div className="practice-progress">
           <span>当前场景：{scenario.englishTitle}</span>
           <div aria-hidden="true">
@@ -413,8 +406,8 @@ function Practice({
               onChange={(event) => onInput(event.target.value)}
               placeholder="例如：I finished the homepage and need help with tests."
             />
-            <button className="primary-button" type="submit">
-              发送
+            <button className="primary-button" type="submit" disabled={sendStatus === "loading"}>
+              {sendStatus === "loading" ? "发送中..." : "发送"}
             </button>
           </div>
         </form>
@@ -463,25 +456,28 @@ function Practice({
 
 function Summary({
   scenario,
-  scores,
-  feedback,
+  summary,
+  status,
+  source,
+  statusText,
   onAgain,
   onChoose,
 }: {
   scenario: Scenario;
-  scores: Record<string, number>;
-  feedback: Feedback[];
+  summary: SessionSummary;
+  status: AsyncState;
+  source: SourceState;
+  statusText: string;
   onAgain: () => void;
   onChoose: () => void;
 }) {
-  const mistakes = feedback.length ? feedback.map((item) => item.issue) : ["建议至少完成 2-3 轮对话，让总结更有参考价值。"];
-
   return (
     <section className="summary-layout page-section">
       <div className="summary-hero">
         <span>{scenario.title} · 课后总结</span>
-        <h1>{scores.综合}</h1>
-        <p>Overall feedback：你已经完成本次场景练习，回答方向清楚。下一步可以尝试增加细节、连接词和更自然的礼貌表达。</p>
+        <h1>{summary.scores.综合}</h1>
+        <p>Overall feedback：{status === "loading" ? "正在向后端生成课后总结和评分..." : summary.overallPerformance}</p>
+        <StatusBanner status={status} source={source} text={statusText} />
         <div className="summary-actions">
           <button className="primary-button" type="button" onClick={onAgain}>
             再练一次
@@ -493,7 +489,7 @@ function Summary({
       </div>
 
       <div className="score-board">
-        {Object.entries(scores).map(([label, value]) => (
+        {Object.entries(summary.scores).map(([label, value]) => (
           <article className="score-row" key={label}>
             <div>
               <span>{label}</span>
@@ -507,11 +503,35 @@ function Summary({
       </div>
 
       <div className="summary-columns">
-        <SummaryList title="优势" items={["能围绕场景目标给出直接回答。", "对话没有偏离角色设定，适合继续扩展。", "已经使用了可理解的基础职场 / 日常词汇。"]} />
-        <SummaryList title="常见问题" items={mistakes.slice(0, 3)} />
-        <SummaryList title="建议复用表达" items={expressions} />
+        <SummaryList title="优势" items={summary.strengths} />
+        <SummaryList title="常见问题" items={summary.repeatedIssues} />
+        <SummaryList title="建议复用表达" items={summary.betterExpressions} />
       </div>
     </section>
+  );
+}
+
+function StatusBanner({
+  status,
+  source,
+  text,
+  onRetry,
+}: {
+  status: AsyncState;
+  source: SourceState;
+  text: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className={`status-banner ${status} ${source}`} role="status">
+      <span>{status === "loading" ? "连接中" : source === "backend" ? "后端 mock" : "本地 fallback"}</span>
+      <p>{text}</p>
+      {onRetry && (
+        <button className="secondary-button compact-button" type="button" onClick={onRetry}>
+          重试
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -536,19 +556,6 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
       </ul>
     </article>
   );
-}
-
-function createFeedback(input: string, index: number): Feedback {
-  const text = input.trim();
-  const sentence = text.endsWith(".") || text.endsWith("?") || text.endsWith("!") ? text : `${text}.`;
-  const corrected = sentence.charAt(0).toUpperCase() + sentence.slice(1);
-  return {
-    id: Date.now() + index,
-    corrected,
-    issue: index % 2 === 0 ? "句子意思清楚，但开头需要大写，并尽量补完整句号。" : "表达可理解，但可以更自然、更像真实对话。",
-    better: index % 2 === 0 ? "I would like to add one specific example to explain my answer." : "Could you give me a little more detail about the next step?",
-    score: Math.min(94, 78 + index * 4 + Math.min(8, Math.floor(text.length / 18))),
-  };
 }
 
 export default App;
