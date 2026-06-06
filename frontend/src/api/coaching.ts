@@ -56,7 +56,7 @@ type ApiSummaryResponse = {
   };
 };
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 const REQUEST_TIMEOUT_MS = 3500;
 
 export const localScenarios: Scenario[] = [
@@ -254,4 +254,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+function normalizeApiBaseUrl(value: string | undefined): string {
+  if (!value) return "";
+  return value.endsWith("/") ? value.slice(0, -1) : value;
 }
