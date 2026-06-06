@@ -1,154 +1,94 @@
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from app.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
     FeedbackRequest,
+    FeedbackScoreBreakdown,
     FeedbackResponse,
+    PracticeSession,
     Scenario,
     ScoreBreakdown,
+    StartSessionRequest,
     SummaryRequest,
     SummaryResponse,
 )
-from app.scenario_catalog import get_scenario_prompt_config
+from app.scenario_catalog import get_scenario_prompt_config, list_scenario_prompt_configs
 
 
-SCENARIOS: dict[str, Scenario] = {
-    "interview": Scenario(
-        id="interview",
-        title="Interview",
-        title_zh="面试",
-        level="Intermediate",
-        ai_role="Hiring manager",
-        user_role="Job candidate",
-        goal=(
-            "Answer interview questions clearly, explain experience, and ask "
-            "professional follow-up questions."
-        ),
-        opening_line=(
-            "Hi, thanks for joining today. Could you briefly introduce yourself "
-            "and tell me why you are interested in this role?"
-        ),
-        conversation_style="Professional, warm, and focused on one question at a time.",
-        feedback_focus=[
-            "tense consistency",
-            "professional wording",
-            "clear examples",
-            "structured answers",
-        ],
-    ),
-    "restaurant": Scenario(
-        id="restaurant",
-        title="Ordering Food",
-        title_zh="点餐",
-        level="Beginner to intermediate",
-        ai_role="Restaurant server",
-        user_role="Customer",
-        goal=(
-            "Order food, ask about recommendations, clarify preferences, and "
-            "handle simple service questions."
-        ),
-        opening_line="Welcome! Are you ready to order, or would you like a few recommendations first?",
-        conversation_style="Friendly, practical, and focused on completing the order.",
-        feedback_focus=[
-            "polite requests",
-            "articles",
-            "countable nouns",
-            "clear preferences",
-        ],
-    ),
-    "ordering_food": Scenario(
-        id="ordering_food",
-        title="Ordering Food",
-        title_zh="点餐",
-        level="Beginner to intermediate",
-        ai_role="Restaurant server",
-        user_role="Customer",
-        goal=(
-            "Order food, ask about recommendations, clarify preferences, and "
-            "handle simple service questions."
-        ),
-        opening_line="Welcome! Are you ready to order, or would you like a few recommendations first?",
-        conversation_style="Friendly, practical, and focused on completing the order.",
-        feedback_focus=[
-            "polite requests",
-            "articles",
-            "countable nouns",
-            "clear preferences",
-        ],
-    ),
-    "meeting": Scenario(
-        id="meeting",
-        title="Meeting",
-        title_zh="会议",
-        level="Intermediate",
-        ai_role="Team lead",
-        user_role="Team member",
-        goal=(
-            "Share progress, discuss blockers, ask for clarification, and agree "
-            "on next steps."
-        ),
-        opening_line="Let's start with your update. What progress have you made since our last meeting?",
-        conversation_style="Work-focused, concise, collaborative, and action-oriented.",
-        feedback_focus=[
-            "present perfect",
-            "blocker phrasing",
-            "clarifying questions",
-            "next steps",
-        ],
-    ),
-    "travel": Scenario(
-        id="travel",
-        title="Travel",
-        title_zh="旅行",
-        level="Beginner to intermediate",
-        ai_role="Travel service representative or helpful local guide",
-        user_role="Traveler",
-        goal=(
-            "Ask for travel information, check in, confirm reservations, and "
-            "handle simple travel problems."
-        ),
-        opening_line="Hello! How can I help you with your trip today?",
-        conversation_style="Clear, patient, and practical.",
-        feedback_focus=[
-            "question forms",
-            "prepositions",
-            "polite requests",
-            "travel vocabulary",
-        ],
-    ),
-    "daily_conversation": Scenario(
-        id="daily_conversation",
-        title="Daily Conversation",
-        title_zh="日常交流",
-        level="Beginner to intermediate",
-        ai_role="Friendly conversation partner",
-        user_role="English learner",
-        goal="Practice casual English about daily life, preferences, and simple follow-up questions.",
-        opening_line="Hi! How's your day going so far?",
-        conversation_style="Casual, friendly, and low-pressure.",
-        feedback_focus=[
-            "basic sentence structure",
-            "tense use",
-            "word order",
-            "natural small talk",
-        ],
-    ),
-}
+SCENARIOS: dict[str, Scenario] = {}
+SESSIONS: dict[str, PracticeSession] = {}
+
+
+def _build_scenarios() -> dict[str, Scenario]:
+    scenarios: dict[str, Scenario] = {}
+    for config in list_scenario_prompt_configs():
+        scenario = Scenario(
+            id="restaurant" if config.scenario_id == "ordering_food" else config.scenario_id,
+            scenario_id=config.scenario_id,
+            title=config.title_en,
+            title_zh=config.title_zh,
+            level=config.level,
+            ai_role=config.ai_role,
+            user_role=config.user_role,
+            goal=config.goal,
+            story_intro=config.story_intro,
+            opening_line=config.opening_message,
+            opening_message=config.opening_message,
+            conversation_style=config.conversation_style,
+            feedback_focus=config.feedback_focus,
+            useful_expressions=config.useful_expressions,
+        )
+        scenarios[scenario.id] = scenario
+        scenarios[config.scenario_id] = scenario
+    return scenarios
+
+
+SCENARIOS.update(_build_scenarios())
 
 
 def list_scenarios() -> list[Scenario]:
-    return list(SCENARIOS.values())
+    return [
+        SCENARIOS["interview"],
+        SCENARIOS["restaurant"],
+        SCENARIOS["meeting"],
+        SCENARIOS["travel"],
+        SCENARIOS["daily_conversation"],
+    ]
+
+
+def start_session(request: StartSessionRequest) -> PracticeSession:
+    scenario = _scenario_for(request.scenario_id)
+    session = PracticeSession(
+        session_id=f"session_{uuid4().hex[:12]}",
+        scenario_id=scenario.id,
+        scenario=scenario,
+        story_intro=scenario.story_intro,
+        opening_message=scenario.opening_message,
+        messages=[],
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    SESSIONS[session.session_id] = session
+    return session
 
 
 def create_chat_reply(request: ChatRequest) -> ChatResponse:
     scenario = _scenario_for(request.scenario_id)
-    user_message = _latest_user_text(request.messages)
+    user_message = _latest_user_text(request)
     reply_text = _scenario_reply(scenario.id, user_message)
     feedback = create_feedback(
-        FeedbackRequest(scenario_id=scenario.id, message=user_message or "Hello.")
+        FeedbackRequest(
+            session_id=request.session_id,
+            scenario_id=scenario.id,
+            latest_user_message=user_message or "Hello.",
+            conversation_history=_conversation_history(request),
+        )
     )
 
     return ChatResponse(
+        session_id=request.session_id or f"session_{uuid4().hex[:12]}",
         scenario_id=scenario.id,
         reply=ChatMessage(role="assistant", content=reply_text),
         quick_feedback=feedback,
@@ -157,21 +97,22 @@ def create_chat_reply(request: ChatRequest) -> ChatResponse:
 
 def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
     scenario = _scenario_for(request.scenario_id)
-    message = request.message.strip()
+    message = _feedback_latest_text(request)
     lowered = message.lower()
 
     if _contains_chinese(message):
         intent = _mixed_language_intent(message)
         expression = _mixed_language_expression(scenario.id, message)
-        return FeedbackResponse(
-            corrected_sentence=expression,
+        return _feedback_response(
+            what_you_said=message,
+            user_intent=intent,
+            recommended_english=expression,
             issue=(
                 "你可以先用中文或中英夹杂表达想法，意思已经可以理解。"
                 "下一步是把核心动作和名词换成自然英文。"
             ),
-            better_expression=expression,
-            user_intent_zh=intent,
-            code_switching_tip=_code_switching_tip(message, expression),
+            why=_code_switching_tip(message, expression),
+            more_natural_option=expression,
             score=80,
         )
 
@@ -181,18 +122,19 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
             .replace("i am graduated", "I graduated")
             .replace("responsible for make", "responsible for making")
         )
-        return FeedbackResponse(
-            corrected_sentence=corrected,
+        return _feedback_response(
+            what_you_said=message,
+            user_intent="The learner is describing past education or project responsibility.",
+            recommended_english=corrected,
             issue=(
                 "Use the simple past for completed events, and use a gerund after "
                 "'responsible for'."
             ),
-            better_expression=(
+            why="Completed past events use simple past, and 'for' is followed by a noun or gerund.",
+            more_natural_option=(
                 "I contributed to a customer research project and prepared the "
                 "final report for our team."
             ),
-            user_intent_zh=None,
-            code_switching_tip=None,
             score=74,
         )
 
@@ -201,12 +143,13 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
             message.replace("Can you recommend me some drink?", "Could you recommend a drink for me?")
             .replace("I want", "I'd like")
         )
-        return FeedbackResponse(
-            corrected_sentence=corrected,
+        return _feedback_response(
+            what_you_said=message,
+            user_intent="The learner wants to order food and ask for a drink recommendation.",
+            recommended_english=corrected,
             issue="Use polite request forms and natural restaurant wording.",
-            better_expression="I'd like a chicken sandwich, please. Could you recommend a drink for me?",
-            user_intent_zh=None,
-            code_switching_tip=None,
+            why="'I'd like' and 'Could you...' sound more polite in a restaurant.",
+            more_natural_option="I'd like a chicken sandwich, please. Could you recommend a drink for me?",
             score=82,
         )
 
@@ -215,31 +158,34 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
             message.replace("some problem with API", "a problem with the API")
             .replace("backend team give me", "the backend team to give me")
         )
-        return FeedbackResponse(
-            corrected_sentence=corrected,
+        return _feedback_response(
+            what_you_said=message,
+            user_intent="The learner is reporting an API blocker and asking the backend team for a format.",
+            recommended_english=corrected,
             issue="Use articles with countable nouns and the pattern 'need someone to do something'.",
-            better_expression=(
+            why="'A problem with the API' and 'need the team to...' are the natural patterns.",
+            more_natural_option=(
                 "The main blocker is that I need the backend team to confirm the "
                 "API response format."
             ),
-            user_intent_zh=None,
-            code_switching_tip=None,
             score=76,
         )
 
-    return FeedbackResponse(
-        corrected_sentence=message,
+    return _feedback_response(
+        what_you_said=message,
+        user_intent="The learner is continuing the scenario conversation.",
+        recommended_english=message,
         issue=f"No major grammar issue for the {scenario.title.lower()} scenario.",
-        better_expression=_default_better_expression(scenario.id),
-        user_intent_zh=None,
-        code_switching_tip=None,
+        why="The sentence is understandable and fits the current practice turn.",
+        more_natural_option=_default_better_expression(scenario.id),
         score=88,
     )
 
 
 def create_summary(request: SummaryRequest) -> SummaryResponse:
     scenario = _scenario_for(request.scenario_id)
-    user_turns = [message.content for message in request.messages if message.role == "user"]
+    history = _summary_history(request)
+    user_turns = [message.content for message in history if message.role == "user"]
     joined_user_text = " ".join(user_turns).lower()
     turn_count = len(user_turns)
 
@@ -275,7 +221,7 @@ def create_summary(request: SummaryRequest) -> SummaryResponse:
             "Add one more specific detail or follow-up question next time."
         ),
         next_practice_focus=_next_focus(scenario.id),
-        code_switching_advice=_summary_code_switching_advice(request.messages),
+        code_switching_advice=_summary_code_switching_advice(history),
         scores=ScoreBreakdown(
             grammar=grammar,
             expression=expression,
@@ -292,11 +238,59 @@ def _scenario_for(scenario_id: str) -> Scenario:
     return SCENARIOS.get(scenario_id, SCENARIOS["interview"])
 
 
-def _latest_user_text(messages: list[ChatMessage]) -> str:
-    for message in reversed(messages):
+def _conversation_history(request: ChatRequest) -> list[ChatMessage]:
+    return request.conversation_history or request.messages
+
+
+def _summary_history(request: SummaryRequest) -> list[ChatMessage]:
+    return request.conversation_history or request.messages
+
+
+def _latest_user_text(request: ChatRequest) -> str:
+    if request.latest_user_message:
+        return request.latest_user_message.strip()
+    for message in reversed(_conversation_history(request)):
         if message.role == "user":
             return message.content
     return ""
+
+
+def _feedback_latest_text(request: FeedbackRequest) -> str:
+    return (request.latest_user_message or request.message or "").strip()
+
+
+def _feedback_response(
+    *,
+    what_you_said: str,
+    user_intent: str,
+    recommended_english: str,
+    issue: str,
+    why: str,
+    more_natural_option: str,
+    score: int,
+    provider: str = "mock",
+) -> FeedbackResponse:
+    score_breakdown = FeedbackScoreBreakdown(
+        grammar=max(0, min(100, score - 2)),
+        expression=score,
+        fluency=max(0, min(100, score + 2)),
+        scenario_fit=max(0, min(100, score + 4)),
+    )
+    return FeedbackResponse(
+        what_you_said=what_you_said,
+        user_intent=user_intent,
+        recommended_english=recommended_english,
+        issue=issue,
+        why=why,
+        more_natural_option=more_natural_option,
+        score=score,
+        score_breakdown=score_breakdown,
+        provider=provider,
+        corrected_sentence=recommended_english,
+        better_expression=more_natural_option,
+        user_intent_zh=user_intent if _contains_chinese(user_intent) else None,
+        code_switching_tip=why if _contains_chinese(what_you_said) else None,
+    )
 
 
 def _scenario_reply(scenario_id: str, user_message: str) -> str:

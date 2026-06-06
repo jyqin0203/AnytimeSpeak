@@ -18,12 +18,12 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 - Backend: FastAPI + Python
 - Speech input: browser `SpeechRecognition`
 - Speech playback: browser `SpeechSynthesis`
-- MVP storage: `localStorage` or mock data
+- MVP storage: frontend state and backend in-memory mock sessions
 - AI integration: environment-variable based LLM configuration with mock mode fallback
 
 ## Current Status
 
-The project has a minimal frontend and backend scaffold. No scenario selection, AI conversation, speech feature, database, or other business flow has been implemented yet.
+The project includes a mock-first MVP practice loop: scenario selection, session-based role-play chat, latest-turn feedback, post-session summary, scoring, browser speech input/playback, user recording replay, and text input fallback. The backend keeps demo sessions in memory and falls back to deterministic mock coaching when no LLM key is configured.
 
 ## Local Development
 
@@ -76,7 +76,7 @@ Related preparation docs:
 
 - Original project code: project scaffold, backend health endpoint, and documentation are maintained in this repository.
 - Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, and HTTPX.
-- AI APIs or AI-generated code usage: no AI API is integrated yet. LLM environment variable placeholders are listed in `.env.example`.
+- AI APIs or AI-generated code usage: optional LLM provider calls are configured through environment variables; mock mode remains the default for reproducible demos. LLM environment variable placeholders are listed in `.env.example`.
 - API keys, private credentials, and unauthorized assets must not be committed.
 
 ## Development Plan

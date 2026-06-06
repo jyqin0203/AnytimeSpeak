@@ -7,12 +7,15 @@ from app.llm_provider import (
     create_summary_with_fallback,
 )
 from app.mock_service import list_scenarios
+from app.mock_service import start_session
 from app.schemas import (
     ChatRequest,
     ChatResponse,
     FeedbackRequest,
     FeedbackResponse,
+    PracticeSession,
     Scenario,
+    StartSessionRequest,
     SummaryRequest,
     SummaryResponse,
 )
@@ -49,6 +52,11 @@ def health_check():
 @app.get("/api/scenarios", response_model=list[Scenario])
 def get_scenarios():
     return list_scenarios()
+
+
+@app.post("/api/sessions", response_model=PracticeSession)
+def post_session(request: StartSessionRequest):
+    return start_session(request)
 
 
 @app.post("/api/chat", response_model=ChatResponse)

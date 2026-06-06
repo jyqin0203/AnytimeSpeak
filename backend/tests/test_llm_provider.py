@@ -185,15 +185,21 @@ def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
     messages = llm_provider._chat_prompt(
         ChatRequest(
             scenario_id="travel",
-            messages=[ChatMessage(role="user", content="我想 check in early.")],
+            latest_user_message="我想 check in early.",
+            conversation_history=[
+                ChatMessage(role="assistant", content="Hello! How can I help you with your trip today?"),
+            ],
         )
     )
     prompt_text = "\n".join(message["content"] for message in messages)
 
+    assert "story" in prompt_text.lower()
     assert "Travel service representative or helpful local guide" in prompt_text
     assert "Traveler" in prompt_text
     assert "Ask for directions or travel information" in prompt_text
     assert "clear, patient, and practical" in prompt_text.lower()
+    assert "Previous conversation" in prompt_text
+    assert "Latest user message: 我想 check in early." in prompt_text
     assert "Chinese-English mixed input" in prompt_text
     assert "continue the conversation naturally" in prompt_text
 
@@ -204,14 +210,19 @@ def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanati
     messages = llm_provider._feedback_prompt(
         FeedbackRequest(
             scenario_id="meeting",
-            message="I want to 预约一个 meeting tomorrow.",
+            latest_user_message="I want to 预约一个 meeting tomorrow.",
+            conversation_history=[
+                ChatMessage(role="user", content="This older turn should not be graded."),
+            ],
         )
     )
     prompt_text = "\n".join(message["content"] for message in messages)
 
     assert "Team lead" in prompt_text
-    assert "user_intent_zh" in prompt_text
-    assert "code_switching_tip" in prompt_text
+    assert "Only evaluate the latest user message" in prompt_text
+    assert "This older turn should not be graded" in prompt_text
+    assert "what_you_said" in prompt_text
+    assert "recommended_english" in prompt_text
     assert "中文" in prompt_text
     assert "不要羞辱用户" in prompt_text
 
@@ -222,7 +233,7 @@ def test_summary_prompt_uses_goal_scoring_focus_and_code_switching_summary():
     messages = llm_provider._summary_prompt(
         SummaryRequest(
             scenario_id="daily_conversation",
-            messages=[
+            conversation_history=[
                 ChatMessage(role="user", content="Today is good."),
                 ChatMessage(role="user", content="我 after work watch movie."),
             ],
@@ -248,12 +259,20 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     def fake_chat_completion(messages):
         return """
         {
-          "corrected_sentence": "I want to schedule a meeting tomorrow.",
-          "issue": "你想表达预约会议，核心意思很清楚。",
-          "better_expression": "I'd like to schedule a meeting for tomorrow.",
-          "user_intent_zh": "我想约一个明天的会议。",
-          "code_switching_tip": "把“预约一个 meeting”整体换成 schedule a meeting。",
-          "score": 82
+          "what_you_said": "I want to 预约一个 meeting tomorrow.",
+          "user_intent": "我想约一个明天的会议。",
+          "recommended_english": "I want to schedule a meeting tomorrow.",
+          "issue": "中英混合表达可以理解，但需要换成完整英文。",
+          "why": "schedule a meeting 是自然的会议预约表达。",
+          "more_natural_option": "I'd like to schedule a meeting for tomorrow.",
+          "score": 82,
+          "score_breakdown": {
+            "grammar": 80,
+            "expression": 82,
+            "fluency": 84,
+            "scenario_fit": 86
+          },
+          "provider": "llm"
         }
         """
 
@@ -262,9 +281,12 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     response = llm_provider.create_feedback_with_fallback(
         FeedbackRequest(
             scenario_id="meeting",
-            message="I want to 预约一个 meeting tomorrow.",
+            latest_user_message="I want to 预约一个 meeting tomorrow.",
         )
     )
 
-    assert response.user_intent_zh == "我想约一个明天的会议。"
-    assert "schedule a meeting" in response.code_switching_tip
+    assert response.what_you_said == "I want to 预约一个 meeting tomorrow."
+    assert response.user_intent == "我想约一个明天的会议。"
+    assert response.recommended_english == "I want to schedule a meeting tomorrow."
+    assert "schedule a meeting" in response.why
+    assert response.provider == "llm"

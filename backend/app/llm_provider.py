@@ -10,6 +10,7 @@ from app.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
+    FeedbackScoreBreakdown,
     FeedbackRequest,
     FeedbackResponse,
     ScoreBreakdown,
@@ -30,6 +31,7 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
     try:
         data = _json_from_llm(_request_chat_completion(_chat_prompt(request)))
         return ChatResponse(
+            session_id=request.session_id or "llm-session",
             scenario_id=request.scenario_id,
             reply=_chat_message_from_data(data.get("reply")),
             quick_feedback=_feedback_from_data(data.get("quick_feedback", {})),
@@ -125,7 +127,8 @@ def _llm_model() -> str:
 
 def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
     scenario = get_scenario_prompt_config(request.scenario_id)
-    transcript = _transcript(request.messages)
+    history = _transcript(_conversation_history(request))
+    latest_user_message = _latest_user_message(request)
     return [
         {
             "role": "system",
@@ -141,8 +144,9 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
                     "do not stop the role play or criticize the learner for code-switching. "
                     "Return JSON only with keys reply and quick_feedback. "
                     "reply must include role='assistant' and content. "
-                    "quick_feedback must include corrected_sentence, issue, "
-                    "better_expression, user_intent_zh, code_switching_tip, and score from 0 to 100. "
+                    "quick_feedback must include what_you_said, user_intent, "
+                    "recommended_english, issue, why, more_natural_option, "
+                    "score, score_breakdown, and provider. "
                     "Keep quick_feedback brief and encouraging."
                 ),
             ),
@@ -151,7 +155,8 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
             "role": "user",
             "content": (
                 f"Scenario id: {request.scenario_id}\n"
-                f"Conversation:\n{transcript}\n"
+                f"Previous conversation:\n{history}\n"
+                f"Latest user message: {latest_user_message}\n"
                 "Continue the role-play with one concise assistant reply and brief feedback."
             ),
         },
@@ -160,6 +165,8 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
 
 def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
     scenario = get_scenario_prompt_config(request.scenario_id)
+    history = _transcript(request.conversation_history)
+    latest_user_message = request.latest_user_message or request.message or ""
     return [
         {
             "role": "system",
@@ -170,27 +177,33 @@ def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
                     "Support English, Chinese, and Chinese-English mixed learner input. "
                     "If the input contains Chinese, first infer the learner's intended meaning, "
                     "then provide a natural English sentence. "
+                    "Only evaluate the latest user message. Use the previous conversation only "
+                    "to understand context; never grade or reuse feedback from older turns. "
                     "Use 中文 explanations so the learner can understand easily. "
                     "不要羞辱用户，不要说用户英语很差；用鼓励式反馈。 "
-                    "Return JSON only with keys corrected_sentence, issue, better_expression, "
-                    "user_intent_zh, code_switching_tip, and score. "
-                    "corrected_sentence and better_expression must be natural English. "
-                    "issue must be Chinese. user_intent_zh should explain the learner's meaning in Chinese "
-                    "when it can be inferred, otherwise null. code_switching_tip should explain in Chinese "
-                    "how to turn mixed Chinese-English wording into natural English, otherwise null. "
-                    "score must be 0 to 100."
+                    "Return JSON only with keys what_you_said, user_intent, recommended_english, "
+                    "issue, why, more_natural_option, score, score_breakdown, and provider. "
+                    "recommended_english and more_natural_option must be natural English. "
+                    "issue and why should be concise Chinese explanations. "
+                    "score_breakdown must include grammar, expression, fluency, and scenario_fit from 0 to 100. "
+                    "provider should be 'llm'."
                 ),
             ),
         },
         {
             "role": "user",
-            "content": f"Scenario id: {request.scenario_id}\nLearner sentence: {request.message}",
+            "content": (
+                f"Scenario id: {request.scenario_id}\n"
+                f"Previous conversation for context only:\n{history}\n"
+                f"Latest user message to evaluate: {latest_user_message}"
+            ),
         },
     ]
 
 
 def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
     scenario = get_scenario_prompt_config(request.scenario_id)
+    history = _summary_history(request)
     return [
         {
             "role": "system",
@@ -214,7 +227,7 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
             "role": "user",
             "content": (
                 f"Scenario id: {request.scenario_id}\n"
-                f"Conversation:\n{_transcript(request.messages)}\n"
+                f"Conversation:\n{_transcript(history)}\n"
                 "Create a concise post-session practice summary."
             ),
         },
@@ -248,13 +261,49 @@ def _chat_message_from_data(data: Any) -> ChatMessage:
 def _feedback_from_data(data: Any) -> FeedbackResponse:
     if not isinstance(data, dict):
         raise ValueError("Feedback must be a JSON object.")
+    if "what_you_said" in data:
+        breakdown = data.get("score_breakdown", {})
+        return FeedbackResponse(
+            what_you_said=str(data["what_you_said"]),
+            user_intent=str(data["user_intent"]),
+            recommended_english=str(data["recommended_english"]),
+            issue=str(data["issue"]),
+            why=str(data["why"]),
+            more_natural_option=str(data["more_natural_option"]),
+            score=int(data["score"]),
+            score_breakdown=FeedbackScoreBreakdown(
+                grammar=int(breakdown["grammar"]),
+                expression=int(breakdown["expression"]),
+                fluency=int(breakdown["fluency"]),
+                scenario_fit=int(breakdown["scenario_fit"]),
+            ),
+            provider=str(data.get("provider", "llm")),
+            corrected_sentence=str(data["recommended_english"]),
+            better_expression=str(data["more_natural_option"]),
+            user_intent_zh=_optional_string(data.get("user_intent")),
+            code_switching_tip=_optional_string(data.get("why")),
+        )
+
+    score = int(data["score"])
     return FeedbackResponse(
-        corrected_sentence=str(data["corrected_sentence"]),
+        what_you_said=str(data.get("what_you_said", "")),
+        user_intent=_optional_string(data.get("user_intent_zh")) or "",
+        recommended_english=str(data["corrected_sentence"]),
         issue=str(data["issue"]),
+        why=_optional_string(data.get("code_switching_tip")) or str(data["issue"]),
+        more_natural_option=str(data["better_expression"]),
+        score=score,
+        score_breakdown=FeedbackScoreBreakdown(
+            grammar=max(0, min(100, score - 2)),
+            expression=score,
+            fluency=max(0, min(100, score + 2)),
+            scenario_fit=max(0, min(100, score + 4)),
+        ),
+        provider=str(data.get("provider", "llm")),
+        corrected_sentence=str(data["corrected_sentence"]),
         better_expression=str(data["better_expression"]),
         user_intent_zh=_optional_string(data.get("user_intent_zh")),
         code_switching_tip=_optional_string(data.get("code_switching_tip")),
-        score=int(data["score"]),
     )
 
 
@@ -276,11 +325,29 @@ def _transcript(messages: list[ChatMessage]) -> str:
     return "\n".join(f"{message.role}: {message.content}" for message in messages)
 
 
+def _conversation_history(request: ChatRequest) -> list[ChatMessage]:
+    return request.conversation_history or request.messages
+
+
+def _summary_history(request: SummaryRequest) -> list[ChatMessage]:
+    return request.conversation_history or request.messages
+
+
+def _latest_user_message(request: ChatRequest) -> str:
+    if request.latest_user_message:
+        return request.latest_user_message
+    for message in reversed(_conversation_history(request)):
+        if message.role == "user":
+            return message.content
+    return ""
+
+
 def _scenario_context(scenario: ScenarioPromptConfig, extra_instructions: str) -> str:
     return (
         "You are an English speaking practice partner for AnytimeSpeak.\n"
         f"Scenario: {scenario.title_en} / {scenario.title_zh}\n"
         f"Canonical scenario id: {scenario.scenario_id}\n"
+        f"Scenario story: {scenario.story_intro}\n"
         f"AI role: {scenario.ai_role}\n"
         f"User role: {scenario.user_role}\n"
         f"Practice goal: {scenario.goal}\n"

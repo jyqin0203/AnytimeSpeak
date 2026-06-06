@@ -19,4 +19,20 @@ def test_restaurant_alias_preserves_existing_backend_scenario_id():
     assert config.scenario_id == "ordering_food"
     assert config.title_zh == "点餐"
     assert config.ai_role == "Restaurant server"
+    assert "busy cafe" in config.story_intro.lower()
     assert "I'd like" in config.useful_expressions
+
+
+def test_catalog_scenarios_include_story_intro_and_opening_message():
+    for config in list_scenario_prompt_configs():
+        assert config.scenario_id
+        assert config.title_en
+        assert config.title_zh
+        assert config.ai_role
+        assert config.user_role
+        assert config.goal
+        assert len(config.story_intro) > 40
+        assert config.opening_message
+        assert config.conversation_style
+        assert config.feedback_focus
+        assert config.useful_expressions

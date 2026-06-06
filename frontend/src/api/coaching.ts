@@ -2,21 +2,42 @@ export type Sender = "ai" | "user";
 
 export type Scenario = {
   id: string;
+  scenarioId: string;
   title: string;
   englishTitle: string;
   description: string;
   aiRole: string;
   userRole: string;
   goal: string;
+  storyIntro: string;
   level: string;
   duration: string;
   focus: string[];
+  usefulExpressions: string[];
   openingLine: string;
   replies: string[];
 };
 
 export type Message = { id: number; sender: Sender; text: string };
-export type Feedback = { id: number; corrected: string; issue: string; better: string; score: number };
+export type PracticeSession = {
+  sessionId: string;
+  scenarioId: string;
+  storyIntro: string;
+  openingMessage: string;
+  messages: Message[];
+  createdAt: string;
+};
+export type Feedback = {
+  id: number;
+  whatYouSaid: string;
+  userIntent: string;
+  recommendedEnglish: string;
+  issue: string;
+  why: string;
+  moreNaturalOption: string;
+  score: number;
+  provider: string;
+};
 export type ScoreBreakdown = Record<"语法" | "表达" | "流畅" | "完成度" | "综合", number>;
 export type SessionSummary = {
   overallPerformance: string;
@@ -28,19 +49,40 @@ export type SessionSummary = {
 
 type ApiScenario = {
   id: string;
+  scenario_id: string;
   title: string;
   title_zh: string;
   level: string;
   ai_role: string;
   user_role: string;
   goal: string;
+  story_intro: string;
   opening_line: string;
+  opening_message: string;
   conversation_style: string;
   feedback_focus: string[];
+  useful_expressions: string[];
 };
 
 type ApiChatMessage = { role: "user" | "assistant"; content: string };
-type ApiFeedback = { corrected_sentence: string; issue: string; better_expression: string; score: number };
+type ApiSession = {
+  session_id: string;
+  scenario_id: string;
+  story_intro: string;
+  opening_message: string;
+  messages: ApiChatMessage[];
+  created_at: string;
+};
+type ApiFeedback = {
+  what_you_said: string;
+  user_intent: string;
+  recommended_english: string;
+  issue: string;
+  why: string;
+  more_natural_option: string;
+  score: number;
+  provider: string;
+};
 type ApiChatResponse = { reply: ApiChatMessage };
 type ApiSummaryResponse = {
   summary: string;
@@ -62,15 +104,18 @@ const REQUEST_TIMEOUT_MS = 3500;
 export const localScenarios: Scenario[] = [
   {
     id: "interview",
+    scenarioId: "interview",
     title: "面试沟通",
     englishTitle: "Interview",
     description: "练习自我介绍、项目经历和职业动机，回答更自然、更有结构。",
     aiRole: "招聘经理",
     userRole: "候选人",
     goal: "清楚介绍自己，说明经验价值，并提出一个专业追问。",
+    storyIntro: "你正在参加一场初级岗位的视频面试。招聘经理已经看过简历，希望听到你用清楚、有信心的英文讲出背景、项目和动机。",
     level: "进阶",
     duration: "8 分钟",
     focus: ["自我介绍", "STAR 表达", "职业动机"],
+    usefulExpressions: ["I contributed to...", "One challenge I faced was...", "I am interested in this role because..."],
     openingLine:
       "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?",
     replies: [
@@ -81,15 +126,18 @@ export const localScenarios: Scenario[] = [
   },
   {
     id: "restaurant",
+    scenarioId: "ordering_food",
     title: "餐厅点餐",
     englishTitle: "Ordering Food",
     description: "从询问推荐到确认偏好，练习礼貌、清楚的日常服务场景表达。",
     aiRole: "餐厅服务员",
     userRole: "顾客",
     goal: "点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
+    storyIntro: "午餐时间你走进一家有点忙的咖啡店。队伍在往前移动，你需要礼貌地询问推荐、说明偏好，并确认最终点单。",
     level: "入门",
     duration: "6 分钟",
     focus: ["礼貌请求", "偏好说明", "订单确认"],
+    usefulExpressions: ["I'd like...", "Could I have...", "Does this come with..."],
     openingLine: "Welcome! Are you ready to order, or would you like a few recommendations first?",
     replies: [
       "Of course. Our grilled salmon is popular today. Do you have any allergies or preferences?",
@@ -99,15 +147,18 @@ export const localScenarios: Scenario[] = [
   },
   {
     id: "meeting",
+    scenarioId: "meeting",
     title: "会议汇报",
     englishTitle: "Meeting",
     description: "练习汇报进展、说明阻塞点、请求支持，并对齐下一步。",
     aiRole: "团队负责人",
     userRole: "团队成员",
     goal: "给出进展更新，说明问题，确认下一步和完成时间。",
+    storyIntro: "你正在参加一个简短的团队站会。团队负责人需要你简洁说明进展、阻塞点，以及接下来可以跟进的行动。",
     level: "进阶",
     duration: "8 分钟",
     focus: ["进度汇报", "问题说明", "下一步对齐"],
+    usefulExpressions: ["The main blocker is...", "Could you clarify...", "I'll follow up by..."],
     openingLine: "Let's start with your update. What progress have you made since our last meeting?",
     replies: [
       "Thanks for the update. Is anything blocking the remaining work right now?",
@@ -125,49 +176,92 @@ export async function fetchScenarios(): Promise<Scenario[]> {
     const local = localById.get(scenario.id);
     return {
       id: scenario.id,
+      scenarioId: scenario.scenario_id,
       title: local?.title ?? `${scenario.title_zh}练习`,
       englishTitle: scenario.title,
       description: local?.description ?? scenario.conversation_style,
       aiRole: local?.aiRole ?? scenario.ai_role,
       userRole: local?.userRole ?? scenario.user_role,
       goal: local?.goal ?? scenario.goal,
+      storyIntro: scenario.story_intro,
       level: local?.level ?? scenario.level,
       duration: local?.duration ?? "8 分钟",
       focus: local?.focus ?? scenario.feedback_focus,
-      openingLine: scenario.opening_line,
+      usefulExpressions: scenario.useful_expressions,
+      openingLine: scenario.opening_message ?? scenario.opening_line,
       replies: local?.replies ?? [scenario.opening_line],
     };
   });
 }
 
-export async function sendChatMessage(scenario: Scenario, messages: Message[]): Promise<Message> {
+export async function startPracticeSession(scenario: Scenario): Promise<PracticeSession> {
+  const response = await request<ApiSession>("/api/sessions", {
+    method: "POST",
+    body: JSON.stringify({ scenario_id: scenario.id }),
+  });
+
+  return {
+    sessionId: response.session_id,
+    scenarioId: response.scenario_id,
+    storyIntro: response.story_intro,
+    openingMessage: response.opening_message,
+    messages: response.messages.map(fromApiMessage),
+    createdAt: response.created_at,
+  };
+}
+
+export async function sendChatMessage(
+  scenario: Scenario,
+  sessionId: string | null,
+  conversationHistory: Message[],
+  latestUserMessage: Message,
+): Promise<Message> {
   const response = await request<ApiChatResponse>("/api/chat", {
     method: "POST",
-    body: JSON.stringify({ scenario_id: scenario.id, messages: toApiMessages(messages) }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      scenario_id: scenario.id,
+      latest_user_message: latestUserMessage.text,
+      conversation_history: toApiMessages(conversationHistory),
+    }),
   });
 
   return { id: Date.now() + 1, sender: "ai", text: response.reply.content };
 }
 
-export async function fetchTurnFeedback(scenario: Scenario, message: Message): Promise<Feedback> {
+export async function fetchTurnFeedback(
+  scenario: Scenario,
+  sessionId: string | null,
+  conversationHistory: Message[],
+  message: Message,
+): Promise<Feedback> {
   const response = await request<ApiFeedback>("/api/feedback", {
     method: "POST",
-    body: JSON.stringify({ scenario_id: scenario.id, message: message.text }),
+    body: JSON.stringify({
+      session_id: sessionId,
+      scenario_id: scenario.id,
+      latest_user_message: message.text,
+      conversation_history: toApiMessages(conversationHistory),
+    }),
   });
 
   return {
     id: message.id,
-    corrected: response.corrected_sentence,
+    whatYouSaid: response.what_you_said,
+    userIntent: response.user_intent,
+    recommendedEnglish: response.recommended_english,
     issue: response.issue,
-    better: response.better_expression,
+    why: response.why,
+    moreNaturalOption: response.more_natural_option,
     score: response.score,
+    provider: response.provider,
   };
 }
 
 export async function fetchSessionSummary(scenario: Scenario, messages: Message[]): Promise<SessionSummary> {
   const response = await request<ApiSummaryResponse>("/api/summary", {
     method: "POST",
-    body: JSON.stringify({ scenario_id: scenario.id, messages: toApiMessages(messages) }),
+    body: JSON.stringify({ scenario_id: scenario.id, conversation_history: toApiMessages(messages) }),
   });
 
   return {
@@ -197,10 +291,14 @@ export function createLocalFeedback(input: string, id = Date.now()): Feedback {
 
   return {
     id,
-    corrected,
+    whatYouSaid: text,
+    userIntent: "你想继续完成当前场景回答。",
+    recommendedEnglish: corrected,
     issue: "后端暂不可用，当前使用前端本地 mock：句子意思清楚，可继续补充细节和自然连接词。",
-    better: "I would like to add one specific example to explain my answer.",
+    why: "当前 fallback 只能给出通用建议，后端恢复后会按场景和上下文分析。",
+    moreNaturalOption: "I would like to add one specific example to explain my answer.",
     score: Math.min(94, 78 + Math.min(10, Math.floor(text.length / 16))),
+    provider: "local-fallback",
   };
 }
 
@@ -211,7 +309,7 @@ export function createLocalSummary(messages: Message[], feedback: Feedback[]): S
   return {
     overallPerformance: "你已经完成本次场景练习，回答方向清楚。下一步可以尝试增加细节、连接词和更自然的礼貌表达。",
     strengths: ["能围绕场景目标给出直接回答。", "对话没有偏离角色设定，适合继续扩展。", "已经使用了可理解的基础职场 / 日常词汇。"],
-    repeatedIssues: feedback.length ? feedback.map((item) => item.issue).slice(0, 3) : ["建议至少完成 2-3 轮对话，让总结更有参考价值。"],
+    repeatedIssues: feedback.length ? feedback.map((item) => item.issue).slice(-3) : ["建议至少完成 2-3 轮对话，让总结更有参考价值。"],
     betterExpressions: [
       "I would like to learn more about...",
       "Could you clarify what you mean by...?",
@@ -233,6 +331,14 @@ function toApiMessages(messages: Message[]): ApiChatMessage[] {
     role: message.sender === "ai" ? "assistant" : "user",
     content: message.text,
   }));
+}
+
+function fromApiMessage(message: ApiChatMessage, index: number): Message {
+  return {
+    id: Date.now() + index,
+    sender: message.role === "assistant" ? "ai" : "user",
+    text: message.content,
+  };
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

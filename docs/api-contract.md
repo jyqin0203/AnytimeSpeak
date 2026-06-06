@@ -7,6 +7,9 @@ This document records the planned AnytimeSpeak MVP API shape for future frontend
 - Base path: `/api`
 - Request and response bodies use JSON.
 - Mock mode is acceptable for all MVP endpoints until provider integration is added.
+- Current coaching endpoints use snake_case JSON fields.
+- Session-based coaching requests carry `scenario_id`, `latest_user_message`, and `conversation_history` so the backend can inject the scenario story, roles, goal, and previous turns into prompts.
+- `/api/feedback` evaluates only `latest_user_message`; `conversation_history` is context only.
 - Mock responses should be deterministic enough for demo recording.
 - API keys, provider tokens, and `.env` contents must never be returned to the frontend.
 - Error responses should use a predictable shape:
@@ -19,6 +22,32 @@ This document records the planned AnytimeSpeak MVP API shape for future frontend
   }
 }
 ```
+
+## Current Session-Based Coaching Contract
+
+`POST /api/sessions` starts a practice session in backend memory. It returns `session_id`, `scenario_id`, the full `scenario` config, `story_intro`, `opening_message`, empty `messages`, and `created_at`.
+
+Scenario objects now include `scenario_id`, `title`, `title_zh`, `ai_role`, `user_role`, `goal`, `story_intro`, `opening_message`, `conversation_style`, `feedback_focus`, and `useful_expressions`.
+
+`POST /api/chat` request shape:
+
+```json
+{
+  "session_id": "session_demo",
+  "scenario_id": "meeting",
+  "latest_user_message": "I want to 预约一个 meeting tomorrow.",
+  "conversation_history": [
+    {
+      "role": "assistant",
+      "content": "Let's start with your update. What progress have you made since our last meeting?"
+    }
+  ]
+}
+```
+
+`POST /api/feedback` uses the same `session_id`, `scenario_id`, `latest_user_message`, and `conversation_history` shape. Its response includes `what_you_said`, `user_intent`, `recommended_english`, `issue`, `why`, `more_natural_option`, `score`, `score_breakdown`, and `provider`.
+
+`POST /api/summary` receives `scenario_id` and full `conversation_history`; summaries and reusable expressions should be tied to the selected scenario goal.
 
 ## GET /api/health
 

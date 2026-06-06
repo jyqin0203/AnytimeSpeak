@@ -10,6 +10,7 @@ class ScenarioPromptConfig:
     ai_role: str
     user_role: str
     goal: str
+    story_intro: str
     opening_message: str
     conversation_style: str
     feedback_focus: list[str]
@@ -29,6 +30,12 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Give a clear self-introduction, explain experience with concrete "
             "examples, answer interview questions, and ask professional follow-up "
             "questions."
+        ),
+        story_intro=(
+            "You are waiting in a video interview lobby for a junior role. "
+            "The hiring manager has your resume and wants to hear a clear, "
+            "confident story about your background, one useful project, and why "
+            "this role matters to you."
         ),
         opening_message=(
             "Hi, thanks for joining today. Could you briefly introduce yourself "
@@ -68,6 +75,11 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Order food and drinks clearly, ask for recommendations, express "
             "preferences politely, and confirm the order."
         ),
+        story_intro=(
+            "You have just walked into a busy cafe during lunch. The server is "
+            "friendly but the line is moving quickly, so you need to ask about "
+            "recommendations, explain preferences, and confirm your order politely."
+        ),
         opening_message="Welcome! Are you ready to order, or would you like a few recommendations first?",
         conversation_style=(
             "Friendly, practical, patient, and focused on completing a restaurant "
@@ -103,6 +115,11 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
         goal=(
             "Give a clear progress update, explain blockers, ask for clarification, "
             "agree on action items, and confirm next steps."
+        ),
+        story_intro=(
+            "You are joining a short team stand-up with your team lead. Everyone "
+            "needs a concise update, a clear blocker if you have one, and a next "
+            "step that can be followed up after the meeting."
         ),
         opening_message="Let's start with your update. What progress have you made since our last meeting?",
         conversation_style=(
@@ -140,6 +157,11 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
             "Ask for directions or travel information, check in or confirm a "
             "reservation, explain simple travel problems, and ask for help politely."
         ),
+        story_intro=(
+            "You are traveling in an unfamiliar city and need practical help from "
+            "a service desk or local guide. Keep details fictional, explain the "
+            "travel task clearly, and confirm the next useful step."
+        ),
         opening_message="Hello! How can I help you with your trip today?",
         conversation_style=(
             "Clear, patient, and practical, with realistic travel vocabulary and "
@@ -174,6 +196,11 @@ SCENARIO_PROMPT_CONFIGS: dict[str, ScenarioPromptConfig] = {
         goal=(
             "Build comfort with casual English conversation, describe daily life, "
             "share preferences, and ask simple follow-up questions."
+        ),
+        story_intro=(
+            "You are chatting with a friendly English-speaking partner after a "
+            "normal day. The goal is not to perform perfectly, but to share small "
+            "details, respond naturally, and ask simple follow-up questions."
         ),
         opening_message="Hi! How's your day going so far?",
         conversation_style=(

@@ -8,6 +8,7 @@ import {
   fetchTurnFeedback,
   localScenarios,
   sendChatMessage,
+  startPracticeSession,
   type Feedback,
   type Message,
   type Scenario,
@@ -30,6 +31,7 @@ function App() {
   const [selected, setSelected] = useState(localScenarios[0]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SessionSummary>(() => createLocalSummary([], []));
   const [input, setInput] = useState("");
   const [source, setSource] = useState<SourceState>("fallback");
@@ -75,6 +77,7 @@ function App() {
     setSelected(scenario);
     setMessages([{ id: 1, sender: "ai", text: scenario.openingLine }]);
     setFeedback([]);
+    setSessionId(null);
     setSummary(createLocalSummary([], []));
     Object.values(voiceRecordingsRef.current).forEach((url) => URL.revokeObjectURL(url));
     voiceRecordingsRef.current = {};
@@ -83,6 +86,22 @@ function App() {
     setSummaryStatus("idle");
     setInput("");
     setView("practice");
+    void startPracticeSession(scenario)
+      .then((session) => {
+        setSessionId(session.sessionId);
+        setSelected((current) => ({
+          ...current,
+          storyIntro: session.storyIntro,
+          openingLine: session.openingMessage,
+        }));
+        setMessages([{ id: 1, sender: "ai", text: session.openingMessage }]);
+        setSource("backend");
+        setStatusText("已开始 session-based 场景练习。");
+      })
+      .catch(() => {
+        setSource("fallback");
+        setStatusText("后端 session 暂不可用，已使用前端本地 mock fallback。");
+      });
   };
 
   const sendText = useCallback(
@@ -92,6 +111,7 @@ function App() {
 
       const id = Date.now();
       const userMessage: Message = { id, sender: "user", text };
+      const conversationHistory = messages;
       const nextMessages = [...messages, userMessage];
 
       setMessages(nextMessages);
@@ -106,7 +126,10 @@ function App() {
       }
 
       try {
-        const [reply, turnFeedback] = await Promise.all([sendChatMessage(selected, nextMessages), fetchTurnFeedback(selected, userMessage)]);
+        const [reply, turnFeedback] = await Promise.all([
+          sendChatMessage(selected, sessionId, conversationHistory, userMessage),
+          fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage),
+        ]);
         setMessages([...nextMessages, reply]);
         setFeedback((current) => [...current, turnFeedback]);
         setSource("backend");
@@ -120,7 +143,7 @@ function App() {
         setStatusText("后端请求失败，本轮已使用前端本地 mock fallback。");
       }
     },
-    [messages, selected, sendStatus],
+    [messages, selected, sendStatus, sessionId],
   );
 
   const send = (event: FormEvent<HTMLFormElement>) => {
@@ -195,6 +218,7 @@ function App() {
           messages={messages}
           voiceRecordings={voiceRecordings}
           feedback={feedback}
+          sessionId={sessionId}
           input={input}
           source={source}
           statusText={statusText}
@@ -324,6 +348,7 @@ function Scenarios({
               </div>
               <h3>{scenario.title}</h3>
               <p>{scenario.description}</p>
+              <p className="scenario-story">{scenario.storyIntro}</p>
               <TagList items={scenario.focus} />
               <dl>
                 <div>
@@ -357,6 +382,7 @@ function Practice({
   messages,
   voiceRecordings,
   feedback,
+  sessionId,
   input,
   source,
   statusText,
@@ -371,6 +397,7 @@ function Practice({
   messages: Message[];
   voiceRecordings: Record<number, string>;
   feedback: Feedback[];
+  sessionId: string | null;
   input: string;
   source: SourceState;
   statusText: string;
@@ -382,7 +409,8 @@ function Practice({
   onReset: () => void;
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
-  const latestScore = feedback[feedback.length - 1]?.score ?? 82;
+  const latestFeedback = feedback[feedback.length - 1];
+  const latestScore = latestFeedback?.score ?? 82;
   const [speechLanguage, setSpeechLanguage] = useState("zh-CN");
   const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
   const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
@@ -455,6 +483,10 @@ function Practice({
         <span className="difficulty">{scenario.level}</span>
         <h2>{scenario.title}</h2>
         <p>{scenario.description}</p>
+        <div className="story-intro">
+          <span>情境前言</span>
+          <p>{scenario.storyIntro}</p>
+        </div>
         <dl>
           <div>
             <dt>AI 角色</dt>
@@ -469,6 +501,14 @@ function Practice({
             <dd>{scenario.goal}</dd>
           </div>
         </dl>
+        <div className="useful-expression-box">
+          <span>可复用表达</span>
+          <ul>
+            {scenario.usefulExpressions.map((expression) => (
+              <li key={expression}>{expression}</li>
+            ))}
+          </ul>
+        </div>
         <TagList items={scenario.focus} />
         <button className="secondary-button" type="button" onClick={onReset}>
           更换场景
@@ -479,7 +519,7 @@ function Practice({
         <div className="panel-title">
           <div>
             <h2>对话练习</h2>
-            <p>输入一句英文，查看后端 mock 的 AI 回复和即时反馈；后端不可用时自动 fallback。</p>
+            <p>{sessionId ? `Session: ${sessionId}` : "正在准备 session；后端不可用时自动 fallback。"}</p>
           </div>
           <button className="danger-button" type="button" onClick={onEnd} disabled={sendStatus === "loading"}>
             {sendStatus === "loading" ? "请稍等" : "结束练习"}
@@ -552,32 +592,40 @@ function Practice({
         </div>
         <div className="panel-title compact">
           <h2>即时反馈</h2>
-          <p>改句、问题、升级表达、单轮分数。</p>
+          <p>当前输入、推荐英文、问题原因、自然表达和单轮分数。</p>
         </div>
         {feedback.length === 0 ? (
           <div className="empty-state">
             <strong>还没有反馈</strong>
-            <p>发送一句英文后，这里会出现 corrected sentence、issue、better expression 和 score。</p>
+            <p>发送一句后，这里只展示最新一轮的推荐英文、问题原因和更自然表达。</p>
           </div>
         ) : (
           <div className="feedback-list">
-            {feedback.map((item) => (
-              <article className="feedback-card" key={item.id}>
-                <div className="score-pill">{item.score}</div>
+            {latestFeedback && (
+              <article className="feedback-card" key={latestFeedback.id}>
+                <div className="score-pill">{latestFeedback.score}</div>
                 <div>
-                  <span>Corrected sentence</span>
-                  <p>{item.corrected}</p>
+                  <span>What you said</span>
+                  <p>{latestFeedback.whatYouSaid}</p>
+                </div>
+                <div>
+                  <span>Recommended English</span>
+                  <p className="english-suggestion">{latestFeedback.recommendedEnglish}</p>
                 </div>
                 <div>
                   <span>Issue</span>
-                  <p>{item.issue}</p>
+                  <p>{latestFeedback.issue}</p>
                 </div>
                 <div>
-                  <span>Better expression</span>
-                  <p>{item.better}</p>
+                  <span>Why</span>
+                  <p>{latestFeedback.why}</p>
+                </div>
+                <div>
+                  <span>More natural option</span>
+                  <p className="english-suggestion">{latestFeedback.moreNaturalOption}</p>
                 </div>
               </article>
-            ))}
+            )}
           </div>
         )}
       </aside>
