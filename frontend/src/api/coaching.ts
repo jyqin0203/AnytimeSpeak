@@ -43,6 +43,7 @@ export type Feedback = {
   score: number;
   scoreBreakdown: FeedbackScoreBreakdown;
   provider: string;
+  fallbackReason?: string | null;
 };
 export type ScoreBreakdown = Record<"语法" | "表达" | "流畅" | "完成度" | "综合", number>;
 export type SessionSummary = {
@@ -52,6 +53,7 @@ export type SessionSummary = {
   betterExpressions: string[];
   scores: ScoreBreakdown;
   provider: string;
+  fallbackReason?: string | null;
 };
 
 type ApiScenario = {
@@ -100,8 +102,9 @@ type ApiFeedback = {
   score: number;
   score_breakdown: ApiFeedbackScoreBreakdown;
   provider: string;
+  fallback_reason?: string | null;
 };
-type ApiChatResponse = { reply: ApiChatMessage };
+type ApiChatResponse = { reply: ApiChatMessage; provider: string; fallback_reason?: string | null; quick_feedback?: ApiFeedback };
 type ApiSummaryResponse = {
   summary: string;
   strengths: string[];
@@ -115,6 +118,7 @@ type ApiSummaryResponse = {
     overall: number;
   };
   provider: string;
+  fallback_reason?: string | null;
 };
 
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
@@ -124,7 +128,14 @@ const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
 // frontend timeout must stay comfortably above the backend's own ceiling —
 // otherwise every real reply gets aborted client-side and treated as a backend
 // failure, even though the backend would have answered a few seconds later.
-const REQUEST_TIMEOUT_MS = 30000;
+const REQUEST_TIMEOUTS_MS: Record<string, number> = {
+  "/api/health": 5000,
+  "/api/scenarios": 10000,
+  "/api/sessions": 10000,
+  "/api/chat": 35000,
+  "/api/feedback": 35000,
+  "/api/summary": 45000,
+};
 
 export const localScenarios: Scenario[] = [
   {
@@ -253,7 +264,7 @@ export async function sendChatMessage(
   sessionId: string | null,
   conversationHistory: Message[],
   latestUserMessage: Message,
-): Promise<Message> {
+): Promise<{ message: Message; provider: string; fallbackReason?: string | null }> {
   const response = await request<ApiChatResponse>("/api/chat", {
     method: "POST",
     body: JSON.stringify({
@@ -264,7 +275,11 @@ export async function sendChatMessage(
     }),
   });
 
-  return { id: Date.now() + 1, sender: "ai", text: response.reply.content };
+  return {
+    message: { id: Date.now() + 1, sender: "ai", text: response.reply.content },
+    provider: response.provider ?? response.quick_feedback?.provider ?? "mock",
+    fallbackReason: response.fallback_reason ?? response.quick_feedback?.fallback_reason ?? null,
+  };
 }
 
 export async function fetchTurnFeedback(
@@ -299,6 +314,7 @@ export async function fetchTurnFeedback(
       "清晰度": response.score_breakdown.clarity,
     },
     provider: response.provider,
+    fallbackReason: response.fallback_reason ?? null,
   };
 }
 
@@ -321,6 +337,7 @@ export async function fetchSessionSummary(scenario: Scenario, messages: Message[
       "综合": response.scores.overall,
     },
     provider: response.provider,
+    fallbackReason: response.fallback_reason ?? null,
   };
 }
 
@@ -351,6 +368,7 @@ export function createLocalSummary(messages: Message[], feedback: Feedback[]): S
       "综合": Math.round((avg + 86 + 84 + 88) / 4),
     },
     provider: "local-fallback",
+    fallbackReason: "frontend_api_unavailable",
   };
 }
 
@@ -369,7 +387,7 @@ function fromApiMessage(message: ApiChatMessage, index: number): Message {
   };
 }
 
-export type ApiFailureReason = "timeout" | "network" | "http";
+export type ApiFailureReason = "timeout" | "network" | "http" | "parse";
 
 export class ApiRequestError extends Error {
   readonly endpoint: string;
@@ -381,7 +399,9 @@ export class ApiRequestError extends Error {
       reason === "http"
         ? `${endpoint} responded with HTTP ${status}`
         : reason === "timeout"
-          ? `${endpoint} timed out after ${REQUEST_TIMEOUT_MS}ms`
+          ? `${endpoint} timed out`
+          : reason === "parse"
+            ? `${endpoint} returned invalid JSON`
           : `${endpoint} could not be reached (network error)`,
     );
     this.name = "ApiRequestError";
@@ -393,7 +413,8 @@ export class ApiRequestError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutMs = REQUEST_TIMEOUTS_MS[path] ?? 15000;
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const url = `${API_BASE_URL}${path}`;
 
   try {
@@ -413,7 +434,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       throw reportFailure(new ApiRequestError(path, "http", response.status));
     }
 
-    return (await response.json()) as T;
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw reportFailure(new ApiRequestError(path, "parse", response.status));
+    }
   } finally {
     window.clearTimeout(timeout);
   }

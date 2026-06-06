@@ -81,6 +81,7 @@ def test_chat_endpoint_returns_scenario_aware_mock_reply():
     assert body["scenario_id"] == "restaurant"
     assert body["session_id"]
     assert body["reply"]["role"] == "assistant"
+    assert body["provider"] == "mock"
     assert "chicken sandwich" in body["reply"]["content"].lower()
     assert "onions" in body["reply"]["content"].lower()
     assert body["quick_feedback"]["what_you_said"] == "I want a chicken sandwich, but no onion."
@@ -111,6 +112,38 @@ def test_feedback_endpoint_returns_correction_and_expression_tip():
     assert set(body["score_breakdown"]) == {"grammar", "naturalness", "relevance", "clarity"}
     assert body["provider"] == "mock"
     assert 0 <= body["score"] <= 100
+
+
+def test_feedback_endpoint_improves_recently_question_mock_quality():
+    response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "daily_conversation",
+            "latest_user_message": "What do you do recently?",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommended_english"] == "What have you been up to recently?"
+    assert "do recently" in body["issue"]
+    assert body["score_breakdown"]["relevance"] >= 80
+
+
+def test_feedback_endpoint_improves_ai_project_mixed_input():
+    response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "daily_conversation",
+            "latest_user_message": "I recently completed 2 AI 应用开发 projects.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommended_english"] == "I recently completed two AI application development projects."
+    assert "AI application development" in body["more_natural_option"]
+    assert body["score_breakdown"]["relevance"] >= 80
 
 
 def test_feedback_endpoint_supports_chinese_input_with_english_suggestion():
@@ -197,3 +230,4 @@ def test_summary_endpoint_returns_scores_and_reusable_suggestions():
         + scores["fluency"] * 0.20
         + scores["scenario_completion"] * 0.30
     )
+    assert body["provider"] == "mock"

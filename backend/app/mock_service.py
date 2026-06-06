@@ -138,6 +138,8 @@ def create_chat_reply(request: ChatRequest) -> ChatResponse:
         scenario_id=scenario.id,
         reply=ChatMessage(role="assistant", content=reply_text),
         quick_feedback=feedback,
+        provider=feedback.provider,
+        fallback_reason=feedback.fallback_reason,
     )
 
 
@@ -171,6 +173,11 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
         clarity -= 4
         issue_notes.append(f"注意 “{pattern}” 这里的用法，更地道的说法是 “{fix}”。")
         why_notes.append("时态、单复数和介词搭配是口语里最容易被听出来的细节，调整后会显得更专业、更自然。")
+
+    if "what do you do recently" in message.lower():
+        naturalness -= 8
+        issue_notes.append("“What do you do recently?” 不自然。询问近况通常用现在完成时，而不是一般现在时的 “do recently”。")
+        why_notes.append("日常交流里更自然的问法是 “What have you been up to recently?” 或 “What have you been doing recently?”。")
 
     if chinglish_hits:
         pattern, fix = chinglish_hits[0]
@@ -527,7 +534,8 @@ _SCENARIO_TOPIC_KEYWORDS: dict[str, list[str]] = {
     ],
     "daily_conversation": [
         "weekend", "movie", "class", "homework", "plan", "friend", "classmate", "coffee",
-        "relax", "周末", "电影", "同学", "计划", "作业", "聊天",
+        "relax", "recently", "project", "projects", "ai", "周末", "电影", "同学", "计划", "作业",
+        "聊天", "最近", "项目", "应用开发",
     ],
 }
 
@@ -569,6 +577,7 @@ def _detect_chinglish(message: str) -> list[tuple[str, str]]:
 
 _GRAMMAR_PATTERNS: list[tuple[str, str]] = [
     ("i am graduated", "I graduated"),
+    ("what do you do recently", "What have you been up to recently"),
     ("i are", "I am"),
     ("he don't", "he doesn't"),
     ("she don't", "she doesn't"),
@@ -589,6 +598,11 @@ def _compose_recommended_english(
     grammar_hits: list[tuple[str, str]],
     chinglish_hits: list[tuple[str, str]],
 ) -> str:
+    lowered = message.lower()
+    if "what do you do recently" in lowered:
+        return "What have you been up to recently?"
+    if "recently completed" in lowered and "ai" in lowered and ("项目" in message or "应用开发" in message):
+        return "I recently completed two AI application development projects."
     if has_chinese:
         return _translate_mixed_message(scenario, message)
 
@@ -602,6 +616,8 @@ def _compose_recommended_english(
 def _translate_mixed_message(scenario: Scenario, message: str) -> str:
     if _mentions_scheduling_meeting(message):
         return "I'd like to schedule a meeting for tomorrow, if that works for you."
+    if "ai" in message.lower() and ("项目" in message or "应用开发" in message):
+        return "I recently completed two AI application development projects."
 
     fragments = _extract_known_fragments(message)
     stripped = message.strip()
@@ -651,6 +667,7 @@ _ZH_EN_VOCAB: list[tuple[str, str]] = [
     ("火车站", "the train station"),
     ("机场", "the airport"),
     ("项目", "the project"),
+    ("应用开发", "application development"),
     ("经验", "my experience"),
     ("实习", "the internship"),
     ("面试", "the interview"),

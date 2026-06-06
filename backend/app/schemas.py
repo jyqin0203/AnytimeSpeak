@@ -85,6 +85,7 @@ class FeedbackResponse(BaseModel):
     score: int = Field(ge=0, le=100)
     score_breakdown: FeedbackScoreBreakdown
     provider: str = "mock"
+    fallback_reason: str | None = None
     corrected_sentence: str | None = None
     better_expression: str | None = None
     user_intent_zh: str | None = None
@@ -96,6 +97,8 @@ class ChatResponse(BaseModel):
     scenario_id: str
     reply: ChatMessage
     quick_feedback: FeedbackResponse
+    provider: str = "mock"
+    fallback_reason: str | None = None
 
 
 class SummaryRequest(BaseModel):
@@ -116,3 +119,4 @@ class SummaryResponse(BaseModel):
     code_switching_advice: str | None = None
     scores: ScoreBreakdown
     provider: str = "mock"
+    fallback_reason: str | None = None

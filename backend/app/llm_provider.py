@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from typing import Any
 
 import httpx
@@ -28,6 +29,10 @@ DEFAULT_LLM_MODEL = "qwen-plus"
 logger = logging.getLogger(__name__)
 
 
+class LLMResponseParseError(ValueError):
+    pass
+
+
 def _log_llm_attempt(operation: str) -> None:
     logger.info("llm_provider: provider_mode=llm, attempting %s via LLM provider", operation)
 
@@ -42,40 +47,62 @@ def _log_fallback(operation: str, error: Exception) -> None:
     )
 
 
+def _log_fallback_reason(operation: str, reason: str) -> None:
+    logger.warning(
+        "llm_provider: %s fallback reason=%s provider_mode=%s api_key_present=%s base_url_present=%s model_present=%s",
+        operation,
+        reason,
+        os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower(),
+        bool(_llm_api_key()),
+        bool(_llm_base_url()),
+        bool(_llm_model()),
+    )
+
+
 def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
-    if not _should_use_llm():
-        return mock_service.create_chat_reply(request)
+    config_reason = _llm_config_fallback_reason()
+    if config_reason:
+        return _mock_chat_reply(request, config_reason)
 
     _log_llm_attempt("chat reply")
     try:
         data = _json_from_llm(_request_chat_completion(_chat_prompt(request)))
+        quick_feedback = _feedback_from_data(data.get("quick_feedback", {}))
+        quick_feedback.provider = "llm"
+        quick_feedback.fallback_reason = None
         return ChatResponse(
             session_id=request.session_id or "llm-session",
             scenario_id=request.scenario_id,
             reply=_chat_message_from_data(data.get("reply")),
-            quick_feedback=_feedback_from_data(data.get("quick_feedback", {})),
+            quick_feedback=quick_feedback,
+            provider="llm",
         )
     except Exception as exc:
         _log_fallback("chat reply", exc)
-        return mock_service.create_chat_reply(request)
+        return _mock_chat_reply(request, _fallback_reason(exc))
 
 
 def create_feedback_with_fallback(request: FeedbackRequest) -> FeedbackResponse:
-    if not _should_use_llm():
-        return mock_service.create_feedback(request)
+    config_reason = _llm_config_fallback_reason()
+    if config_reason:
+        return _mock_feedback(request, config_reason)
 
     _log_llm_attempt("feedback")
     try:
         data = _json_from_llm(_request_chat_completion(_feedback_prompt(request)))
-        return _feedback_from_data(data)
+        feedback = _feedback_from_data(data)
+        feedback.provider = "llm"
+        feedback.fallback_reason = None
+        return feedback
     except Exception as exc:
         _log_fallback("feedback", exc)
-        return mock_service.create_feedback(request)
+        return _mock_feedback(request, _fallback_reason(exc))
 
 
 def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
-    if not _should_use_llm():
-        return mock_service.create_summary(request)
+    config_reason = _llm_config_fallback_reason()
+    if config_reason:
+        return _mock_summary(request, config_reason)
 
     _log_llm_attempt("session summary")
     try:
@@ -101,14 +128,46 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
         )
     except Exception as exc:
         _log_fallback("session summary", exc)
-        return mock_service.create_summary(request)
+        return _mock_summary(request, _fallback_reason(exc))
 
 
-def _should_use_llm() -> bool:
-    if os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower() != "llm":
-        return False
+def _mock_chat_reply(request: ChatRequest, reason: str) -> ChatResponse:
+    response = mock_service.create_chat_reply(request)
+    response.provider = "mock"
+    response.fallback_reason = reason
+    response.quick_feedback.provider = "mock"
+    response.quick_feedback.fallback_reason = reason
+    _log_fallback_reason("chat reply", reason)
+    return response
 
-    return bool(_llm_api_key())
+
+def _mock_feedback(request: FeedbackRequest, reason: str) -> FeedbackResponse:
+    response = mock_service.create_feedback(request)
+    response.provider = "mock"
+    response.fallback_reason = reason
+    _log_fallback_reason("feedback", reason)
+    return response
+
+
+def _mock_summary(request: SummaryRequest, reason: str) -> SummaryResponse:
+    response = mock_service.create_summary(request)
+    response.provider = "mock"
+    response.fallback_reason = reason
+    _log_fallback_reason("session summary", reason)
+    return response
+
+
+def _llm_config_fallback_reason() -> str | None:
+    provider_mode = os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower()
+    if provider_mode != "llm":
+        return "provider_mode_not_llm"
+    if not _llm_api_key():
+        return "missing_api_key"
+    if not _llm_base_url():
+        return "missing_base_url"
+    if not _llm_model():
+        return "missing_model"
+    return None
 
 
 def _request_chat_completion(messages: list[dict[str, str]]) -> str:
@@ -139,7 +198,7 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
 
 
 def _llm_api_key() -> str:
-    return os.getenv("OPENAI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
+    return os.getenv("LLM_API_KEY", "").strip() or os.getenv("OPENAI_API_KEY", "").strip()
 
 
 def _llm_base_url() -> str:
@@ -287,18 +346,42 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
 
 
 def _json_from_llm(content: str) -> dict[str, Any]:
-    try:
-        parsed = json.loads(content)
-    except json.JSONDecodeError:
-        start = content.find("{")
-        end = content.rfind("}")
-        if start == -1 or end == -1 or end <= start:
-            raise
-        parsed = json.loads(content[start : end + 1])
+    candidates = [content, *_code_fence_contents(content)]
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidates.append(content[start : end + 1])
 
-    if not isinstance(parsed, dict):
-        raise ValueError("LLM response must be a JSON object.")
-    return parsed
+    last_error: Exception | None = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate.strip())
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            continue
+
+        if not isinstance(parsed, dict):
+            raise LLMResponseParseError("LLM response must be a JSON object.")
+        return parsed
+
+    logger.warning("llm_provider: parse_failed response_length=%s", len(content))
+    raise LLMResponseParseError("LLM response JSON parsing failed.") from last_error
+
+
+def _code_fence_contents(content: str) -> list[str]:
+    return [match.group(1) for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", content, re.IGNORECASE)]
+
+
+def _fallback_reason(exc: Exception) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "llm_timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"llm_http_{exc.response.status_code}"
+    if isinstance(exc, LLMResponseParseError):
+        return "json_parse_failed"
+    if isinstance(exc, (KeyError, TypeError, ValueError)):
+        return "schema_validation_failed"
+    return "llm_request_failed"
 
 
 def _chat_message_from_data(data: Any) -> ChatMessage:

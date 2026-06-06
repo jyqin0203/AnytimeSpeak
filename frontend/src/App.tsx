@@ -18,7 +18,7 @@ import { useSpeechInput, useSpeechOutput, useVoiceRecorder, type VoiceRecording 
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary";
-type SourceState = "backend" | "fallback";
+type SourceState = "llm" | "backend-mock" | "local-fallback";
 type AsyncState = "idle" | "loading" | "error";
 
 const features = ["场景化练习", "AI 角色对话", "语法 / 表达反馈", "课后总结评分"];
@@ -34,7 +34,7 @@ function App() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SessionSummary>(() => createLocalSummary([], []));
   const [input, setInput] = useState("");
-  const [source, setSource] = useState<SourceState>("fallback");
+  const [source, setSource] = useState<SourceState>("local-fallback");
   const [scenarioStatus, setScenarioStatus] = useState<AsyncState>("loading");
   const [sendStatus, setSendStatus] = useState<AsyncState>("idle");
   const [summaryStatus, setSummaryStatus] = useState<AsyncState>("idle");
@@ -61,13 +61,13 @@ function App() {
       const backendScenarios = await fetchScenarios();
       setScenarios(backendScenarios);
       setSelected((current) => backendScenarios.find((scenario) => scenario.id === current.id) ?? backendScenarios[0]);
-      setSource("backend");
+      setSource("backend-mock");
       setScenarioStatus("idle");
       setStatusText("已连接练习服务，可以开始场景练习。");
     } catch {
       setScenarios(localScenarios);
       setSelected((current) => localScenarios.find((scenario) => scenario.id === current.id) ?? localScenarios[0]);
-      setSource("fallback");
+      setSource("local-fallback");
       setScenarioStatus("error");
       setStatusText("练习服务暂不可用，已切换到本地练习模式。");
     }
@@ -98,11 +98,11 @@ function App() {
           openingLine: session.openingMessage,
         }));
         setMessages([{ id: 1, sender: "ai", text: session.openingMessage }]);
-        setSource("backend");
+        setSource("backend-mock");
         setStatusText("已根据本轮场景故事开始练习。");
       })
       .catch(() => {
-        setSource("fallback");
+        setSource("local-fallback");
         setStatusText("练习会话暂时连不上后端，已使用本地模式继续。");
       });
   };
@@ -135,7 +135,7 @@ function App() {
       ]);
 
       const reply =
-        replyResult.status === "fulfilled" ? replyResult.value : createLocalReply(selected, nextMessages);
+        replyResult.status === "fulfilled" ? replyResult.value.message : createLocalReply(selected, nextMessages);
       setMessages([...nextMessages, reply]);
 
       if (feedbackResult.status === "fulfilled") {
@@ -147,17 +147,17 @@ function App() {
       }
 
       if (replyResult.status === "fulfilled" && feedbackResult.status === "fulfilled") {
-        setSource("backend");
+        setSource(sourceFromProvider(feedbackResult.value.provider));
         setSendStatus("idle");
-        setStatusText("本轮 AI 回复和即时反馈均来自练习服务。");
+        setStatusText(providerStatusText(feedbackResult.value.provider, feedbackResult.value.fallbackReason));
       } else if (replyResult.status === "fulfilled") {
-        setSource("backend");
+        setSource(sourceFromProvider(replyResult.value.provider));
         setSendStatus("idle");
-        setStatusText("本轮 AI 回复已生成，即时反馈本轮暂时不可用，可继续对话。");
+        setStatusText("AI 回复来自后端，但本轮反馈暂时不可用，可继续对话。");
       } else {
-        setSource("fallback");
+        setSource("local-fallback");
         setSendStatus("error");
-        setStatusText("练习服务请求失败，本轮对话已使用本地模式继续。");
+        setStatusText("前端完全请求不到后端，本轮对话已使用前端本地模式继续。");
       }
     },
     [messages, selected, sendStatus, sessionId],
@@ -182,14 +182,14 @@ function App() {
     try {
       const backendSummary = await fetchSessionSummary(selected, messages);
       setSummary(backendSummary);
-      setSource("backend");
+      setSource(sourceFromProvider(backendSummary.provider));
       setSummaryStatus("idle");
-      setStatusText("课后总结和评分来自练习服务。");
+      setStatusText(providerStatusText(backendSummary.provider, backendSummary.fallbackReason));
     } catch {
       setSummary(fallbackSummary);
-      setSource("fallback");
+      setSource("local-fallback");
       setSummaryStatus("error");
-      setStatusText("课后总结请求失败，已展示本地练习模式生成的总结。");
+      setStatusText("前端完全请求不到后端，已展示前端本地模式生成的总结。");
     }
   };
 
@@ -267,7 +267,7 @@ function Home({ onStart, source, statusText }: { onStart: () => void; source: So
   return (
     <section className="landing-grid page-section">
       <div className="hero-copy">
-        <span className="eyebrow">{source === "backend" ? "已连接练习服务" : "本地练习模式 · 离线也能练"}</span>
+        <span className="eyebrow">{sourceLabel(source)}</span>
         <h1>随时开口练英语</h1>
         <p className="product-positioning">AnytimeSpeak · AI English Speaking Coach</p>
         <p className="hero-description">从真实场景进入对话，边练边看语法和表达建议，结束后获得一份清晰的口语能力总结。</p>
@@ -661,7 +661,7 @@ function Practice({
                   <div className="score-breakdown-head">
                     <span>本轮评分</span>
                     <span className={`provider-badge ${latestFeedback.provider === "llm" ? "llm" : "fallback"}`}>
-                      {latestFeedback.provider === "llm" ? "由 LLM 生成" : "本地 Mock / Fallback"}
+                      {providerBadgeText(latestFeedback.provider)}
                     </span>
                   </div>
                   <div className="score-breakdown-grid">
@@ -706,7 +706,7 @@ function Summary({
         <p className="summary-provider-line">
           总体评价：{status === "loading" ? "正在生成课后总结和评分..." : summary.overallPerformance}
           <span className={`provider-badge ${summary.provider === "llm" ? "llm" : "fallback"}`}>
-            {summary.provider === "llm" ? "由 LLM 生成" : "本地 fallback 生成"}
+            {providerBadgeText(summary.provider)}
           </span>
         </p>
         <StatusBanner status={status} source={source} text={statusText} />
@@ -756,7 +756,7 @@ function StatusBanner({
 }) {
   return (
     <div className={`status-banner ${status} ${source}`} role="status">
-      <span>{status === "loading" ? "连接中" : source === "backend" ? "练习服务" : "本地练习模式"}</span>
+      <span>{status === "loading" ? loadingLabel(text) : sourceLabel(source)}</span>
       <p>{text}</p>
       {onRetry && (
         <button className="secondary-button compact-button" type="button" onClick={onRetry}>
@@ -791,3 +791,33 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
 }
 
 export default App;
+
+function sourceFromProvider(provider: string): SourceState {
+  if (provider === "llm") return "llm";
+  if (provider === "mock") return "backend-mock";
+  return "local-fallback";
+}
+
+function sourceLabel(source: SourceState): string {
+  if (source === "llm") return "LLM";
+  if (source === "backend-mock") return "后端 Mock / Fallback";
+  return "前端本地模式";
+}
+
+function providerStatusText(provider: string, fallbackReason?: string | null): string {
+  if (provider === "llm") return "本轮来自真实 LLM。";
+  if (provider === "mock") return `后端 API 成功，但后端 fallback 到 mock。原因：${fallbackReason ?? "未提供"}`;
+  return "前端完全请求不到后端，已使用前端本地模式。";
+}
+
+function providerBadgeText(provider: string): string {
+  if (provider === "llm") return "由 LLM 生成";
+  if (provider === "mock") return "后端 Mock / Fallback";
+  return "前端本地模式";
+}
+
+function loadingLabel(text: string): string {
+  if (text.includes("分析")) return "正在分析";
+  if (text.includes("总结")) return "正在总结";
+  return "AI 思考中";
+}

@@ -307,9 +307,19 @@ button {
   white-space: nowrap;
 }
 
-.status-banner.backend span {
+.status-banner.llm span {
+  color: #23654d;
+  background: rgba(108, 190, 147, 0.24);
+}
+
+.status-banner.backend-mock span {
   color: #476b86;
   background: rgba(158, 215, 245, 0.24);
+}
+
+.status-banner.local-fallback span {
+  color: #8c3d72;
+  background: rgba(246, 168, 207, 0.18);
 }
 
 .status-banner.loading span {
