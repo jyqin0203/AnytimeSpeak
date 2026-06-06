@@ -188,6 +188,13 @@ button {
   font-weight: 900;
 }
 
+.primary-button:disabled,
+.secondary-button:disabled,
+.danger-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .primary-button {
   color: #fff;
   background: linear-gradient(135deg, var(--pink), #b86be8);
@@ -204,6 +211,12 @@ button {
   color: #9b476d;
   background: #fff0f7;
   border-color: #f7bfd8;
+}
+
+.compact-button {
+  min-height: 2.3rem;
+  padding: 0 0.8rem;
+  font-size: 0.82rem;
 }
 
 .hero-panel,
@@ -264,8 +277,48 @@ button {
 
 .preview-feedback,
 .score-row,
-.practice-progress {
+.practice-progress,
+.status-banner {
   background: rgba(255, 250, 240, 0.72);
+}
+
+.status-banner {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+  padding: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  color: var(--muted);
+}
+
+.status-banner span {
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  color: #8c3d72;
+  background: rgba(246, 168, 207, 0.18);
+  font-size: 0.78rem;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.status-banner.backend span {
+  color: #476b86;
+  background: rgba(158, 215, 245, 0.24);
+}
+
+.status-banner.loading span {
+  color: #7b5d29;
+  background: rgba(255, 198, 168, 0.3);
+}
+
+.status-banner p {
+  margin: 0;
+  line-height: 1.5;
+  font-size: 0.88rem;
+  font-weight: 800;
 }
 
 .preview-feedback {
