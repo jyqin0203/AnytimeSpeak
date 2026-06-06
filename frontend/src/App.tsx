@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   createLocalFeedback,
   createLocalReply,
@@ -13,6 +13,8 @@ import {
   type Scenario,
   type SessionSummary,
 } from "./api/coaching";
+import { VoiceControls } from "./components/VoiceControls";
+import { useSpeechInput, useSpeechOutput, useVoiceRecorder, type VoiceRecording } from "./speech";
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary";
@@ -35,10 +37,19 @@ function App() {
   const [sendStatus, setSendStatus] = useState<AsyncState>("idle");
   const [summaryStatus, setSummaryStatus] = useState<AsyncState>("idle");
   const [statusText, setStatusText] = useState("正在连接后端 mock coaching APIs...");
+  const [voiceRecordings, setVoiceRecordings] = useState<Record<number, string>>({});
+  const voiceRecordingsRef = useRef<Record<number, string>>({});
 
   useEffect(() => {
     void loadScenarios();
   }, []);
+
+  useEffect(
+    () => () => {
+      Object.values(voiceRecordingsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    },
+    [],
+  );
 
   const loadScenarios = async () => {
     setScenarioStatus("loading");
@@ -65,39 +76,61 @@ function App() {
     setMessages([{ id: 1, sender: "ai", text: scenario.openingLine }]);
     setFeedback([]);
     setSummary(createLocalSummary([], []));
+    Object.values(voiceRecordingsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    voiceRecordingsRef.current = {};
+    setVoiceRecordings({});
     setSendStatus("idle");
     setSummaryStatus("idle");
     setInput("");
     setView("practice");
   };
 
-  const send = async (event: FormEvent<HTMLFormElement>) => {
+  const sendText = useCallback(
+    async (rawText: string, recording?: VoiceRecording | null) => {
+      const text = rawText.trim();
+      if (!text || sendStatus === "loading") return;
+
+      const id = Date.now();
+      const userMessage: Message = { id, sender: "user", text };
+      const nextMessages = [...messages, userMessage];
+
+      setMessages(nextMessages);
+      setInput("");
+      setSendStatus("loading");
+      if (recording) {
+        setVoiceRecordings((current) => {
+          const next = { ...current, [id]: recording.url };
+          voiceRecordingsRef.current = next;
+          return next;
+        });
+      }
+
+      try {
+        const [reply, turnFeedback] = await Promise.all([sendChatMessage(selected, nextMessages), fetchTurnFeedback(selected, userMessage)]);
+        setMessages([...nextMessages, reply]);
+        setFeedback((current) => [...current, turnFeedback]);
+        setSource("backend");
+        setSendStatus("idle");
+        setStatusText("本轮 AI 回复和即时反馈来自后端 mock API。");
+      } catch {
+        setMessages([...nextMessages, createLocalReply(selected, nextMessages)]);
+        setFeedback((current) => [...current, createLocalFeedback(text, id)]);
+        setSource("fallback");
+        setSendStatus("error");
+        setStatusText("后端请求失败，本轮已使用前端本地 mock fallback。");
+      }
+    },
+    [messages, selected, sendStatus],
+  );
+
+  const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const text = input.trim();
+    void sendText(input);
+  };
+
+  const submitVoiceText = (text: string, recording?: VoiceRecording | null) => {
     if (!text || sendStatus === "loading") return;
-
-    const id = Date.now();
-    const userMessage: Message = { id, sender: "user", text };
-    const nextMessages = [...messages, userMessage];
-
-    setMessages(nextMessages);
-    setInput("");
-    setSendStatus("loading");
-
-    try {
-      const [reply, turnFeedback] = await Promise.all([sendChatMessage(selected, nextMessages), fetchTurnFeedback(selected, userMessage)]);
-      setMessages([...nextMessages, reply]);
-      setFeedback((current) => [...current, turnFeedback]);
-      setSource("backend");
-      setSendStatus("idle");
-      setStatusText("本轮 AI 回复和即时反馈来自后端 mock API。");
-    } catch {
-      setMessages([...nextMessages, createLocalReply(selected, nextMessages)]);
-      setFeedback((current) => [...current, createLocalFeedback(text, id)]);
-      setSource("fallback");
-      setSendStatus("error");
-      setStatusText("后端请求失败，本轮已使用前端本地 mock fallback。");
-    }
+    void sendText(text, recording);
   };
 
   const endPractice = async () => {
@@ -160,6 +193,7 @@ function App() {
         <Practice
           scenario={selected}
           messages={messages}
+          voiceRecordings={voiceRecordings}
           feedback={feedback}
           input={input}
           source={source}
@@ -167,6 +201,7 @@ function App() {
           sendStatus={sendStatus}
           onInput={setInput}
           onSend={send}
+          onSendText={submitVoiceText}
           onEnd={endPractice}
           onReset={() => setView("scenarios")}
         />
@@ -320,6 +355,7 @@ function Scenarios({
 function Practice({
   scenario,
   messages,
+  voiceRecordings,
   feedback,
   input,
   source,
@@ -327,11 +363,13 @@ function Practice({
   sendStatus,
   onInput,
   onSend,
+  onSendText,
   onEnd,
   onReset,
 }: {
   scenario: Scenario;
   messages: Message[];
+  voiceRecordings: Record<number, string>;
   feedback: Feedback[];
   input: string;
   source: SourceState;
@@ -339,11 +377,77 @@ function Practice({
   sendStatus: AsyncState;
   onInput: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
+  onSendText: (value: string, recording?: VoiceRecording | null) => void;
   onEnd: () => void;
   onReset: () => void;
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestScore = feedback[feedback.length - 1]?.score ?? 82;
+  const [speechLanguage, setSpeechLanguage] = useState("zh-CN");
+  const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
+  const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
+  const lastSpokenAiId = useRef<number | null>(null);
+  const latestTranscriptRef = useRef("");
+  const playbackRef = useRef<HTMLAudioElement | null>(null);
+  const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
+  const voiceRecorder = useVoiceRecorder();
+  const speechInput = useSpeechInput({
+    lang: speechLanguage,
+    interimResults: true,
+    continuous: true,
+    onTranscriptChange: (transcript) => {
+      latestTranscriptRef.current = transcript;
+      onInput(transcript);
+    },
+  });
+
+  useEffect(() => {
+    if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
+    lastSpokenAiId.current = latestAiMessage.id;
+    speechOutput.speak(latestAiMessage.text);
+  }, [latestAiMessage, speechOutput]);
+
+  const toggleVoiceInput = () => {
+    if (speechInput.isListening || speechInput.isRestarting) {
+      speechInput.stopListening();
+      const transcript = latestTranscriptRef.current.trim() || speechInput.transcript.trim();
+      void voiceRecorder.stopRecording().then((recording) => {
+        if (transcript) {
+          onSendText(transcript, recording);
+          speechInput.resetTranscript();
+          latestTranscriptRef.current = "";
+        }
+      });
+      return;
+    }
+
+    latestTranscriptRef.current = "";
+    speechInput.resetTranscript();
+    void voiceRecorder.startRecording().finally(() => {
+      speechInput.startListening();
+    });
+  };
+
+  const playMessageAudio = (message: Message) => {
+    const recordingUrl = message.sender === "user" ? voiceRecordings[message.id] : undefined;
+
+    if (recordingUrl) {
+      speechOutput.stopSpeaking();
+      playbackRef.current?.pause();
+      playbackRef.current = new Audio(recordingUrl);
+      void playbackRef.current.play();
+      return;
+    }
+
+    speechOutput.speak(message.text);
+  };
+
+  useEffect(
+    () => () => {
+      playbackRef.current?.pause();
+    },
+    [],
+  );
 
   return (
     <section className="practice-shell page-section">
@@ -390,27 +494,54 @@ function Practice({
           <strong>{turns} 轮</strong>
         </div>
         <div className="message-list" aria-live="polite">
-          {messages.map((message) => (
-            <article className={`message-bubble ${message.sender}`} key={message.id}>
-              <span>{message.sender === "ai" ? scenario.aiRole : "你"}</span>
-              <p>{message.text}</p>
-            </article>
-          ))}
+          {messages.map((message) => {
+            const hasRecording = message.sender === "user" && Boolean(voiceRecordings[message.id]);
+
+            return (
+              <article className={`message-bubble ${message.sender}`} key={message.id}>
+                <div className="message-meta">
+                  <span>{message.sender === "ai" ? scenario.aiRole : "你"}</span>
+                  <button
+                    className="read-aloud-button"
+                    type="button"
+                    onClick={() => playMessageAudio(message)}
+                    disabled={!hasRecording && (!speechOutput.isSupported || speechOutput.isSpeaking)}
+                  >
+                    {message.sender === "ai" ? "重播" : hasRecording ? "录音" : "朗读"}
+                  </button>
+                </div>
+                <p>{message.text}</p>
+              </article>
+            );
+          })}
         </div>
-        <form className="composer" onSubmit={onSend}>
-          <label htmlFor="practice-input">你的英文回答</label>
-          <div>
-            <input
-              id="practice-input"
-              value={input}
-              onChange={(event) => onInput(event.target.value)}
-              placeholder="例如：I finished the homepage and need help with tests."
-            />
-            <button className="primary-button" type="submit" disabled={sendStatus === "loading"}>
-              {sendStatus === "loading" ? "发送中..." : "发送"}
-            </button>
-          </div>
-        </form>
+        <VoiceControls
+          input={speechInput}
+          output={speechOutput}
+          sampleText={latestAiText}
+          language={speechLanguage}
+          onLanguageChange={setSpeechLanguage}
+          onToggleListening={toggleVoiceInput}
+          isSending={sendStatus === "loading"}
+          recorderError={voiceRecorder.error?.message ?? null}
+        />
+        <details className="text-fallback">
+          <summary>改用文字输入</summary>
+          <form className="composer" onSubmit={onSend}>
+            <label htmlFor="practice-input">你的英文回答</label>
+            <div>
+              <input
+                id="practice-input"
+                value={input}
+                onChange={(event) => onInput(event.target.value)}
+                placeholder="例如：I finished the homepage and need help with tests."
+              />
+              <button className="primary-button" type="submit" disabled={sendStatus === "loading"}>
+                {sendStatus === "loading" ? "发送中..." : "发送"}
+              </button>
+            </div>
+          </form>
+        </details>
       </div>
 
       <aside className="feedback-panel">
