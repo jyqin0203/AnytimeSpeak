@@ -118,7 +118,13 @@ type ApiSummaryResponse = {
 };
 
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
-const REQUEST_TIMEOUT_MS = 3500;
+// The backend gives the LLM provider up to 20s before falling back to mock
+// (see backend/app/llm_provider.py LLM_TIMEOUT_SECONDS). A real LLM-backed
+// /api/chat, /api/feedback, or /api/summary call regularly takes 8-15s, so the
+// frontend timeout must stay comfortably above the backend's own ceiling —
+// otherwise every real reply gets aborted client-side and treated as a backend
+// failure, even though the backend would have answered a few seconds later.
+const REQUEST_TIMEOUT_MS = 30000;
 
 export const localScenarios: Scenario[] = [
   {
@@ -363,25 +369,70 @@ function fromApiMessage(message: ApiChatMessage, index: number): Message {
   };
 }
 
+export type ApiFailureReason = "timeout" | "network" | "http";
+
+export class ApiRequestError extends Error {
+  readonly endpoint: string;
+  readonly status: number | null;
+  readonly reason: ApiFailureReason;
+
+  constructor(endpoint: string, reason: ApiFailureReason, status: number | null) {
+    super(
+      reason === "http"
+        ? `${endpoint} responded with HTTP ${status}`
+        : reason === "timeout"
+          ? `${endpoint} timed out after ${REQUEST_TIMEOUT_MS}ms`
+          : `${endpoint} could not be reached (network error)`,
+    );
+    this.name = "ApiRequestError";
+    this.endpoint = endpoint;
+    this.reason = reason;
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const url = `${API_BASE_URL}${path}`;
 
   try {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
-      ...init,
-      headers: { "Content-Type": "application/json", ...init?.headers },
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        ...init,
+        headers: { "Content-Type": "application/json", ...init?.headers },
+        signal: controller.signal,
+      });
+    } catch {
+      const reason: ApiFailureReason = controller.signal.aborted ? "timeout" : "network";
+      throw reportFailure(new ApiRequestError(path, reason, null));
+    }
 
     if (!response.ok) {
-      throw new Error(`API request failed with status ${response.status}`);
+      throw reportFailure(new ApiRequestError(path, "http", response.status));
     }
 
     return (await response.json()) as T;
   } finally {
     window.clearTimeout(timeout);
   }
+}
+
+// Surfaces exactly which endpoint failed, why, and (for HTTP errors) the
+// status code — so a 422 schema mismatch, a timeout, and "backend not running"
+// are distinguishable in the console instead of all collapsing into the same
+// generic "本地练习模式" banner. Logs only the endpoint path and failure
+// classification: never headers, bodies, API keys, or tokens.
+function reportFailure(error: ApiRequestError): ApiRequestError {
+  if (import.meta.env.DEV) {
+    console.error(
+      `[coaching-api] ${error.endpoint} -> ${error.reason}` +
+        (error.status !== null ? ` (HTTP ${error.status})` : "") +
+        " — falling back to local mode for this call. Check that the backend is running and reachable at the proxied /api path.",
+    );
+  }
+  return error;
 }
 
 function normalizeApiBaseUrl(value: string | undefined): string {
