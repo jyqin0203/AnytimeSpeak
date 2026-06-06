@@ -1,6 +1,7 @@
 export { browserSpeechInputProvider, browserSpeechOutputProvider } from "./browserSpeechProvider";
 export { useSpeechInput } from "./useSpeechInput";
 export { useSpeechOutput } from "./useSpeechOutput";
+export { useVoiceRecorder } from "./useVoiceRecorder";
 export type {
   PronunciationAssessmentProvider,
   PronunciationAssessmentResult,
@@ -12,4 +13,6 @@ export type {
   SpeechOutputState,
   SpeechProviderError,
   SpeechRecognitionResult,
+  VoiceRecorderState,
+  VoiceRecording,
 } from "./types";

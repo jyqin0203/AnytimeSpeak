@@ -14,7 +14,7 @@ import {
   type SessionSummary,
 } from "./api/coaching";
 import { VoiceControls } from "./components/VoiceControls";
-import { useSpeechInput, useSpeechOutput } from "./speech";
+import { useSpeechInput, useSpeechOutput, useVoiceRecorder, type VoiceRecording } from "./speech";
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary";
@@ -37,10 +37,19 @@ function App() {
   const [sendStatus, setSendStatus] = useState<AsyncState>("idle");
   const [summaryStatus, setSummaryStatus] = useState<AsyncState>("idle");
   const [statusText, setStatusText] = useState("正在连接后端 mock coaching APIs...");
+  const [voiceRecordings, setVoiceRecordings] = useState<Record<number, string>>({});
+  const voiceRecordingsRef = useRef<Record<number, string>>({});
 
   useEffect(() => {
     void loadScenarios();
   }, []);
+
+  useEffect(
+    () => () => {
+      Object.values(voiceRecordingsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    },
+    [],
+  );
 
   const loadScenarios = async () => {
     setScenarioStatus("loading");
@@ -67,6 +76,9 @@ function App() {
     setMessages([{ id: 1, sender: "ai", text: scenario.openingLine }]);
     setFeedback([]);
     setSummary(createLocalSummary([], []));
+    Object.values(voiceRecordingsRef.current).forEach((url) => URL.revokeObjectURL(url));
+    voiceRecordingsRef.current = {};
+    setVoiceRecordings({});
     setSendStatus("idle");
     setSummaryStatus("idle");
     setInput("");
@@ -74,7 +86,7 @@ function App() {
   };
 
   const sendText = useCallback(
-    async (rawText: string) => {
+    async (rawText: string, recording?: VoiceRecording | null) => {
       const text = rawText.trim();
       if (!text || sendStatus === "loading") return;
 
@@ -85,6 +97,13 @@ function App() {
       setMessages(nextMessages);
       setInput("");
       setSendStatus("loading");
+      if (recording) {
+        setVoiceRecordings((current) => {
+          const next = { ...current, [id]: recording.url };
+          voiceRecordingsRef.current = next;
+          return next;
+        });
+      }
 
       try {
         const [reply, turnFeedback] = await Promise.all([sendChatMessage(selected, nextMessages), fetchTurnFeedback(selected, userMessage)]);
@@ -109,9 +128,9 @@ function App() {
     void sendText(input);
   };
 
-  const submitVoiceText = (text: string) => {
+  const submitVoiceText = (text: string, recording?: VoiceRecording | null) => {
     if (!text || sendStatus === "loading") return;
-    void sendText(text);
+    void sendText(text, recording);
   };
 
   const endPractice = async () => {
@@ -174,6 +193,7 @@ function App() {
         <Practice
           scenario={selected}
           messages={messages}
+          voiceRecordings={voiceRecordings}
           feedback={feedback}
           input={input}
           source={source}
@@ -335,6 +355,7 @@ function Scenarios({
 function Practice({
   scenario,
   messages,
+  voiceRecordings,
   feedback,
   input,
   source,
@@ -348,6 +369,7 @@ function Practice({
 }: {
   scenario: Scenario;
   messages: Message[];
+  voiceRecordings: Record<number, string>;
   feedback: Feedback[];
   input: string;
   source: SourceState;
@@ -355,7 +377,7 @@ function Practice({
   sendStatus: AsyncState;
   onInput: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
-  onSendText: (value: string) => void;
+  onSendText: (value: string, recording?: VoiceRecording | null) => void;
   onEnd: () => void;
   onReset: () => void;
 }) {
@@ -366,7 +388,9 @@ function Practice({
   const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
   const lastSpokenAiId = useRef<number | null>(null);
   const latestTranscriptRef = useRef("");
+  const playbackRef = useRef<HTMLAudioElement | null>(null);
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
+  const voiceRecorder = useVoiceRecorder();
   const speechInput = useSpeechInput({
     lang: speechLanguage,
     interimResults: true,
@@ -387,18 +411,43 @@ function Practice({
     if (speechInput.isListening || speechInput.isRestarting) {
       speechInput.stopListening();
       const transcript = latestTranscriptRef.current.trim() || speechInput.transcript.trim();
-      if (transcript) {
-        onSendText(transcript);
-        speechInput.resetTranscript();
-        latestTranscriptRef.current = "";
-      }
+      void voiceRecorder.stopRecording().then((recording) => {
+        if (transcript) {
+          onSendText(transcript, recording);
+          speechInput.resetTranscript();
+          latestTranscriptRef.current = "";
+        }
+      });
       return;
     }
 
     latestTranscriptRef.current = "";
     speechInput.resetTranscript();
-    speechInput.startListening();
+    void voiceRecorder.startRecording().finally(() => {
+      speechInput.startListening();
+    });
   };
+
+  const playMessageAudio = (message: Message) => {
+    const recordingUrl = message.sender === "user" ? voiceRecordings[message.id] : undefined;
+
+    if (recordingUrl) {
+      speechOutput.stopSpeaking();
+      playbackRef.current?.pause();
+      playbackRef.current = new Audio(recordingUrl);
+      void playbackRef.current.play();
+      return;
+    }
+
+    speechOutput.speak(message.text);
+  };
+
+  useEffect(
+    () => () => {
+      playbackRef.current?.pause();
+    },
+    [],
+  );
 
   return (
     <section className="practice-shell page-section">
@@ -445,22 +494,26 @@ function Practice({
           <strong>{turns} 轮</strong>
         </div>
         <div className="message-list" aria-live="polite">
-          {messages.map((message) => (
-            <article className={`message-bubble ${message.sender}`} key={message.id}>
-              <div className="message-meta">
-                <span>{message.sender === "ai" ? scenario.aiRole : "你"}</span>
-                <button
-                  className="read-aloud-button"
-                  type="button"
-                  onClick={() => speechOutput.speak(message.text)}
-                  disabled={!speechOutput.isSupported || speechOutput.isSpeaking}
-                >
-                  {message.sender === "ai" ? "重播" : "朗读"}
-                </button>
-              </div>
-              <p>{message.text}</p>
-            </article>
-          ))}
+          {messages.map((message) => {
+            const hasRecording = message.sender === "user" && Boolean(voiceRecordings[message.id]);
+
+            return (
+              <article className={`message-bubble ${message.sender}`} key={message.id}>
+                <div className="message-meta">
+                  <span>{message.sender === "ai" ? scenario.aiRole : "你"}</span>
+                  <button
+                    className="read-aloud-button"
+                    type="button"
+                    onClick={() => playMessageAudio(message)}
+                    disabled={!hasRecording && (!speechOutput.isSupported || speechOutput.isSpeaking)}
+                  >
+                    {message.sender === "ai" ? "重播" : hasRecording ? "录音" : "朗读"}
+                  </button>
+                </div>
+                <p>{message.text}</p>
+              </article>
+            );
+          })}
         </div>
         <VoiceControls
           input={speechInput}
@@ -470,6 +523,7 @@ function Practice({
           onLanguageChange={setSpeechLanguage}
           onToggleListening={toggleVoiceInput}
           isSending={sendStatus === "loading"}
+          recorderError={voiceRecorder.error?.message ?? null}
         />
         <details className="text-fallback">
           <summary>改用文字输入</summary>

@@ -11,9 +11,10 @@ type VoiceControlsProps = {
   onLanguageChange: (language: string) => void;
   onToggleListening: () => void;
   isSending: boolean;
+  recorderError: string | null;
 };
 
-export function VoiceControls({ input, output, sampleText, language, onLanguageChange, onToggleListening, isSending }: VoiceControlsProps) {
+export function VoiceControls({ input, output, sampleText, language, onLanguageChange, onToggleListening, isSending, recorderError }: VoiceControlsProps) {
   const isActive = input.isListening || input.isRestarting;
   const inputStatus = input.isSupported
     ? isActive
@@ -68,6 +69,7 @@ export function VoiceControls({ input, output, sampleText, language, onLanguageC
       </div>
 
       {input.error && <p className="voice-warning">{input.error.message}</p>}
+      {recorderError && <p className="voice-warning">{recorderError}</p>}
       {output.error && <p className="voice-warning">{output.error.message}</p>}
     </section>
   );

@@ -92,6 +92,19 @@ export type SpeechOutputProvider = {
   stop: () => void;
 };
 
+export type VoiceRecording = {
+  blob: Blob;
+  url: string;
+  mimeType: string;
+  durationMs?: number;
+};
+
+export type VoiceRecorderState = {
+  isRecording: boolean;
+  isSupported: boolean;
+  error: SpeechProviderError | null;
+};
+
 export type PronunciationAssessmentResult = {
   overallScore: number;
   accuracyScore?: number;
