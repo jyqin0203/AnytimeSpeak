@@ -13,6 +13,8 @@ import {
   type Scenario,
   type SessionSummary,
 } from "./api/coaching";
+import { VoiceControls } from "./components/VoiceControls";
+import { useSpeechInput, useSpeechOutput } from "./speech";
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary";
@@ -344,6 +346,13 @@ function Practice({
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestScore = feedback[feedback.length - 1]?.score ?? 82;
+  const latestAiText = [...messages].reverse().find((message) => message.sender === "ai")?.text ?? scenario.openingLine;
+  const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
+  const speechInput = useSpeechInput({
+    lang: "en-US",
+    interimResults: true,
+    onTranscriptChange: (transcript) => onInput(transcript),
+  });
 
   return (
     <section className="practice-shell page-section">
@@ -392,11 +401,24 @@ function Practice({
         <div className="message-list" aria-live="polite">
           {messages.map((message) => (
             <article className={`message-bubble ${message.sender}`} key={message.id}>
-              <span>{message.sender === "ai" ? scenario.aiRole : "你"}</span>
+              <div className="message-meta">
+                <span>{message.sender === "ai" ? scenario.aiRole : "你"}</span>
+                {message.sender === "ai" && (
+                  <button
+                    className="read-aloud-button"
+                    type="button"
+                    onClick={() => speechOutput.speak(message.text)}
+                    disabled={!speechOutput.isSupported || speechOutput.isSpeaking}
+                  >
+                    朗读
+                  </button>
+                )}
+              </div>
               <p>{message.text}</p>
             </article>
           ))}
         </div>
+        <VoiceControls input={speechInput} output={speechOutput} sampleText={latestAiText} />
         <form className="composer" onSubmit={onSend}>
           <label htmlFor="practice-input">你的英文回答</label>
           <div>
