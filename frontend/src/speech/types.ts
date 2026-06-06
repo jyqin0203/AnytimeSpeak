@@ -29,6 +29,7 @@ export type SpeechInputState = {
   finalTranscript: string;
   interimTranscript: string;
   isListening: boolean;
+  isRestarting: boolean;
   isSupported: boolean;
   error: SpeechProviderError | null;
 };

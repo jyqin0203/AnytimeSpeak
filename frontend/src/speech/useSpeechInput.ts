@@ -22,11 +22,13 @@ export function useSpeechInput({
     finalTranscript: "",
     interimTranscript: "",
     isListening: false,
+    isRestarting: false,
     isSupported: provider.getSupport(),
     error: null,
   }));
   const sessionRef = useRef<SpeechInputSession | null>(null);
   const finalTranscriptRef = useRef("");
+  const shouldListenRef = useRef(false);
   const onTranscriptChangeRef = useRef(onTranscriptChange);
 
   useEffect(() => {
@@ -55,6 +57,7 @@ export function useSpeechInput({
         ...current,
         isSupported: false,
         isListening: false,
+        isRestarting: false,
         error: {
           code: "not-supported",
           message: "当前浏览器不支持语音识别，请继续使用文本输入。",
@@ -64,15 +67,33 @@ export function useSpeechInput({
       return;
     }
 
+    shouldListenRef.current = true;
     disposeSession();
     setState((current) => ({ ...current, isSupported: true, error: null }));
 
     const session = provider.createSession(
       { lang, interimResults, continuous },
       {
-        onStart: () => setState((current) => ({ ...current, isListening: true, error: null })),
-        onEnd: () => setState((current) => ({ ...current, isListening: false })),
-        onError: (error) => setState((current) => ({ ...current, isListening: false, error })),
+        onStart: () => setState((current) => ({ ...current, isListening: true, isRestarting: false, error: null })),
+        onEnd: () => {
+          setState((current) => ({ ...current, isListening: false, isRestarting: shouldListenRef.current }));
+          if (shouldListenRef.current) {
+            window.setTimeout(() => {
+              if (shouldListenRef.current) {
+                try {
+                  session.start();
+                } catch {
+                  shouldListenRef.current = false;
+                  setState((current) => ({ ...current, isRestarting: false }));
+                }
+              }
+            }, 250);
+          }
+        },
+        onError: (error) => {
+          shouldListenRef.current = false;
+          setState((current) => ({ ...current, isListening: false, isRestarting: false, error }));
+        },
         onResult: (result) => {
           const nextFinalTranscript = result.finalTranscript
             ? `${finalTranscriptRef.current} ${result.finalTranscript}`.trim()
@@ -104,9 +125,11 @@ export function useSpeechInput({
     try {
       session.start();
     } catch (cause) {
+      shouldListenRef.current = false;
       setState((current) => ({
         ...current,
         isListening: false,
+        isRestarting: false,
         error: {
           code: "unknown",
           message: "语音识别启动失败，请继续使用文本输入。",
@@ -119,11 +142,14 @@ export function useSpeechInput({
 
   const stopListening = useCallback(() => {
     try {
+      shouldListenRef.current = false;
       sessionRef.current?.stop();
+      setState((current) => ({ ...current, isRestarting: false }));
     } catch (cause) {
       setState((current) => ({
         ...current,
         isListening: false,
+        isRestarting: false,
         error: {
           code: "unknown",
           message: "语音识别停止失败。",
@@ -134,7 +160,13 @@ export function useSpeechInput({
     }
   }, [provider.id]);
 
-  useEffect(() => disposeSession, [disposeSession]);
+  useEffect(
+    () => () => {
+      shouldListenRef.current = false;
+      disposeSession();
+    },
+    [disposeSession],
+  );
 
   return useMemo(
     () => ({

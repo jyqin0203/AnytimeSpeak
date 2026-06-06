@@ -7,48 +7,63 @@ type VoiceControlsProps = {
   input: SpeechInputControls;
   output: SpeechOutputControls;
   sampleText: string;
+  language: string;
+  onLanguageChange: (language: string) => void;
+  onToggleListening: () => void;
+  isSending: boolean;
 };
 
-export function VoiceControls({ input, output, sampleText }: VoiceControlsProps) {
-  const inputStatus = input.isSupported ? (input.isListening ? "正在聆听英文回答" : "可使用麦克风输入") : "当前浏览器不支持语音识别";
-  const outputStatus = output.isSupported ? (output.isSpeaking ? "AI 回复朗读中" : "可朗读 AI 回复") : "当前浏览器不支持语音朗读";
+export function VoiceControls({ input, output, sampleText, language, onLanguageChange, onToggleListening, isSending }: VoiceControlsProps) {
+  const isActive = input.isListening || input.isRestarting;
+  const inputStatus = input.isSupported
+    ? isActive
+      ? "正在听你说话，再点一次会停止并发送"
+      : "点击麦克风开始说话"
+    : "当前浏览器不支持语音识别";
+  const outputStatus = output.isSupported ? (output.isSpeaking ? "对方回复正在自动播放" : "对方回复会自动播放") : "当前浏览器不支持语音朗读";
 
   return (
     <section className="voice-controls" aria-label="语音练习控制">
-      <div className="voice-status-grid">
+      <div className="voice-primary">
+        <button
+          className={`microphone-button ${isActive ? "recording" : ""}`}
+          type="button"
+          onClick={onToggleListening}
+          disabled={!input.isSupported || isSending}
+          aria-pressed={isActive}
+          aria-label={isActive ? "停止录音并发送" : "开始麦克风输入"}
+        >
+          <span className="microphone-icon" aria-hidden="true">
+            <span />
+          </span>
+        </button>
         <div>
-          <span>语音输入</span>
-          <strong className={input.isListening ? "recording" : ""}>{inputStatus}</strong>
-        </div>
-        <div>
-          <span>语音朗读</span>
-          <strong>{outputStatus}</strong>
+          <span>麦克风优先</span>
+          <strong className={isActive ? "recording" : ""}>{inputStatus}</strong>
+          <p>{isSending ? "正在发送到后端 mock coaching API..." : outputStatus}</p>
         </div>
       </div>
 
-      <div className="voice-button-row">
-        <button className="secondary-button" type="button" onClick={input.startListening} disabled={!input.isSupported || input.isListening}>
-          {input.isSupported ? (input.isListening ? "正在聆听" : "开始说话") : "语音不可用"}
+      <div className="voice-mode-row" aria-label="识别语言">
+        <button className={language === "zh-CN" ? "active" : ""} type="button" onClick={() => onLanguageChange("zh-CN")} disabled={isActive}>
+          中英混合
         </button>
-        <button className="secondary-button" type="button" onClick={input.stopListening} disabled={!input.isListening}>
-          停止录音
-        </button>
-        <button className="secondary-button" type="button" onClick={input.resetTranscript} disabled={!input.transcript}>
-          清空识别
+        <button className={language === "en-US" ? "active" : ""} type="button" onClick={() => onLanguageChange("en-US")} disabled={isActive}>
+          English
         </button>
       </div>
 
       <div className="voice-transcript" aria-live="polite">
         <span>识别结果</span>
-        <p>{input.transcript || "点击“开始说话”后，识别出的英文会显示在这里，并自动填入输入框。你仍然可以手动修改后再发送。"}</p>
+        <p>{input.transcript || "点击麦克风后直接说中文、英文或中英夹杂内容；再次点击会停止录音并自动发送。"}</p>
       </div>
 
       <div className="voice-button-row">
         <button className="secondary-button" type="button" onClick={() => output.speak(sampleText)} disabled={!output.isSupported || output.isSpeaking}>
-          朗读示例文本
+          重播对方回复
         </button>
         <button className="secondary-button" type="button" onClick={output.stopSpeaking} disabled={!output.isSpeaking}>
-          停止朗读
+          停止播放
         </button>
       </div>
 

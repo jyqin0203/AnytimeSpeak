@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   createLocalFeedback,
   createLocalReply,
@@ -73,33 +73,45 @@ function App() {
     setView("practice");
   };
 
-  const send = async (event: FormEvent<HTMLFormElement>) => {
+  const sendText = useCallback(
+    async (rawText: string) => {
+      const text = rawText.trim();
+      if (!text || sendStatus === "loading") return;
+
+      const id = Date.now();
+      const userMessage: Message = { id, sender: "user", text };
+      const nextMessages = [...messages, userMessage];
+
+      setMessages(nextMessages);
+      setInput("");
+      setSendStatus("loading");
+
+      try {
+        const [reply, turnFeedback] = await Promise.all([sendChatMessage(selected, nextMessages), fetchTurnFeedback(selected, userMessage)]);
+        setMessages([...nextMessages, reply]);
+        setFeedback((current) => [...current, turnFeedback]);
+        setSource("backend");
+        setSendStatus("idle");
+        setStatusText("本轮 AI 回复和即时反馈来自后端 mock API。");
+      } catch {
+        setMessages([...nextMessages, createLocalReply(selected, nextMessages)]);
+        setFeedback((current) => [...current, createLocalFeedback(text, id)]);
+        setSource("fallback");
+        setSendStatus("error");
+        setStatusText("后端请求失败，本轮已使用前端本地 mock fallback。");
+      }
+    },
+    [messages, selected, sendStatus],
+  );
+
+  const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const text = input.trim();
+    void sendText(input);
+  };
+
+  const submitVoiceText = (text: string) => {
     if (!text || sendStatus === "loading") return;
-
-    const id = Date.now();
-    const userMessage: Message = { id, sender: "user", text };
-    const nextMessages = [...messages, userMessage];
-
-    setMessages(nextMessages);
-    setInput("");
-    setSendStatus("loading");
-
-    try {
-      const [reply, turnFeedback] = await Promise.all([sendChatMessage(selected, nextMessages), fetchTurnFeedback(selected, userMessage)]);
-      setMessages([...nextMessages, reply]);
-      setFeedback((current) => [...current, turnFeedback]);
-      setSource("backend");
-      setSendStatus("idle");
-      setStatusText("本轮 AI 回复和即时反馈来自后端 mock API。");
-    } catch {
-      setMessages([...nextMessages, createLocalReply(selected, nextMessages)]);
-      setFeedback((current) => [...current, createLocalFeedback(text, id)]);
-      setSource("fallback");
-      setSendStatus("error");
-      setStatusText("后端请求失败，本轮已使用前端本地 mock fallback。");
-    }
+    void sendText(text);
   };
 
   const endPractice = async () => {
@@ -169,6 +181,7 @@ function App() {
           sendStatus={sendStatus}
           onInput={setInput}
           onSend={send}
+          onSendText={submitVoiceText}
           onEnd={endPractice}
           onReset={() => setView("scenarios")}
         />
@@ -329,6 +342,7 @@ function Practice({
   sendStatus,
   onInput,
   onSend,
+  onSendText,
   onEnd,
   onReset,
 }: {
@@ -341,18 +355,50 @@ function Practice({
   sendStatus: AsyncState;
   onInput: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
+  onSendText: (value: string) => void;
   onEnd: () => void;
   onReset: () => void;
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestScore = feedback[feedback.length - 1]?.score ?? 82;
-  const latestAiText = [...messages].reverse().find((message) => message.sender === "ai")?.text ?? scenario.openingLine;
+  const [speechLanguage, setSpeechLanguage] = useState("zh-CN");
+  const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
+  const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
+  const lastSpokenAiId = useRef<number | null>(null);
+  const latestTranscriptRef = useRef("");
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
   const speechInput = useSpeechInput({
-    lang: "en-US",
+    lang: speechLanguage,
     interimResults: true,
-    onTranscriptChange: (transcript) => onInput(transcript),
+    continuous: true,
+    onTranscriptChange: (transcript) => {
+      latestTranscriptRef.current = transcript;
+      onInput(transcript);
+    },
   });
+
+  useEffect(() => {
+    if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
+    lastSpokenAiId.current = latestAiMessage.id;
+    speechOutput.speak(latestAiMessage.text);
+  }, [latestAiMessage, speechOutput]);
+
+  const toggleVoiceInput = () => {
+    if (speechInput.isListening || speechInput.isRestarting) {
+      speechInput.stopListening();
+      const transcript = latestTranscriptRef.current.trim() || speechInput.transcript.trim();
+      if (transcript) {
+        onSendText(transcript);
+        speechInput.resetTranscript();
+        latestTranscriptRef.current = "";
+      }
+      return;
+    }
+
+    latestTranscriptRef.current = "";
+    speechInput.resetTranscript();
+    speechInput.startListening();
+  };
 
   return (
     <section className="practice-shell page-section">
@@ -403,36 +449,45 @@ function Practice({
             <article className={`message-bubble ${message.sender}`} key={message.id}>
               <div className="message-meta">
                 <span>{message.sender === "ai" ? scenario.aiRole : "你"}</span>
-                {message.sender === "ai" && (
-                  <button
-                    className="read-aloud-button"
-                    type="button"
-                    onClick={() => speechOutput.speak(message.text)}
-                    disabled={!speechOutput.isSupported || speechOutput.isSpeaking}
-                  >
-                    朗读
-                  </button>
-                )}
+                <button
+                  className="read-aloud-button"
+                  type="button"
+                  onClick={() => speechOutput.speak(message.text)}
+                  disabled={!speechOutput.isSupported || speechOutput.isSpeaking}
+                >
+                  {message.sender === "ai" ? "重播" : "朗读"}
+                </button>
               </div>
               <p>{message.text}</p>
             </article>
           ))}
         </div>
-        <VoiceControls input={speechInput} output={speechOutput} sampleText={latestAiText} />
-        <form className="composer" onSubmit={onSend}>
-          <label htmlFor="practice-input">你的英文回答</label>
-          <div>
-            <input
-              id="practice-input"
-              value={input}
-              onChange={(event) => onInput(event.target.value)}
-              placeholder="例如：I finished the homepage and need help with tests."
-            />
-            <button className="primary-button" type="submit" disabled={sendStatus === "loading"}>
-              {sendStatus === "loading" ? "发送中..." : "发送"}
-            </button>
-          </div>
-        </form>
+        <VoiceControls
+          input={speechInput}
+          output={speechOutput}
+          sampleText={latestAiText}
+          language={speechLanguage}
+          onLanguageChange={setSpeechLanguage}
+          onToggleListening={toggleVoiceInput}
+          isSending={sendStatus === "loading"}
+        />
+        <details className="text-fallback">
+          <summary>改用文字输入</summary>
+          <form className="composer" onSubmit={onSend}>
+            <label htmlFor="practice-input">你的英文回答</label>
+            <div>
+              <input
+                id="practice-input"
+                value={input}
+                onChange={(event) => onInput(event.target.value)}
+                placeholder="例如：I finished the homepage and need help with tests."
+              />
+              <button className="primary-button" type="submit" disabled={sendStatus === "loading"}>
+                {sendStatus === "loading" ? "发送中..." : "发送"}
+              </button>
+            </div>
+          </form>
+        </details>
       </div>
 
       <aside className="feedback-panel">
