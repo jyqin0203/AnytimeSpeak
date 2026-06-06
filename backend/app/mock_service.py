@@ -9,6 +9,7 @@ from app.schemas import (
     SummaryRequest,
     SummaryResponse,
 )
+from app.scenario_catalog import get_scenario_prompt_config
 
 
 SCENARIOS: dict[str, Scenario] = {
@@ -55,6 +56,26 @@ SCENARIOS: dict[str, Scenario] = {
             "clear preferences",
         ],
     ),
+    "ordering_food": Scenario(
+        id="ordering_food",
+        title="Ordering Food",
+        title_zh="点餐",
+        level="Beginner to intermediate",
+        ai_role="Restaurant server",
+        user_role="Customer",
+        goal=(
+            "Order food, ask about recommendations, clarify preferences, and "
+            "handle simple service questions."
+        ),
+        opening_line="Welcome! Are you ready to order, or would you like a few recommendations first?",
+        conversation_style="Friendly, practical, and focused on completing the order.",
+        feedback_focus=[
+            "polite requests",
+            "articles",
+            "countable nouns",
+            "clear preferences",
+        ],
+    ),
     "meeting": Scenario(
         id="meeting",
         title="Meeting",
@@ -73,6 +94,43 @@ SCENARIOS: dict[str, Scenario] = {
             "blocker phrasing",
             "clarifying questions",
             "next steps",
+        ],
+    ),
+    "travel": Scenario(
+        id="travel",
+        title="Travel",
+        title_zh="旅行",
+        level="Beginner to intermediate",
+        ai_role="Travel service representative or helpful local guide",
+        user_role="Traveler",
+        goal=(
+            "Ask for travel information, check in, confirm reservations, and "
+            "handle simple travel problems."
+        ),
+        opening_line="Hello! How can I help you with your trip today?",
+        conversation_style="Clear, patient, and practical.",
+        feedback_focus=[
+            "question forms",
+            "prepositions",
+            "polite requests",
+            "travel vocabulary",
+        ],
+    ),
+    "daily_conversation": Scenario(
+        id="daily_conversation",
+        title="Daily Conversation",
+        title_zh="日常交流",
+        level="Beginner to intermediate",
+        ai_role="Friendly conversation partner",
+        user_role="English learner",
+        goal="Practice casual English about daily life, preferences, and simple follow-up questions.",
+        opening_line="Hi! How's your day going so far?",
+        conversation_style="Casual, friendly, and low-pressure.",
+        feedback_focus=[
+            "basic sentence structure",
+            "tense use",
+            "word order",
+            "natural small talk",
         ],
     ),
 }
@@ -102,6 +160,21 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
     message = request.message.strip()
     lowered = message.lower()
 
+    if _contains_chinese(message):
+        intent = _mixed_language_intent(message)
+        expression = _mixed_language_expression(scenario.id, message)
+        return FeedbackResponse(
+            corrected_sentence=expression,
+            issue=(
+                "你可以先用中文或中英夹杂表达想法，意思已经可以理解。"
+                "下一步是把核心动作和名词换成自然英文。"
+            ),
+            better_expression=expression,
+            user_intent_zh=intent,
+            code_switching_tip=_code_switching_tip(message, expression),
+            score=80,
+        )
+
     if "am graduated" in lowered or "responsible for make" in lowered:
         corrected = (
             message.replace("I am graduated", "I graduated")
@@ -118,6 +191,8 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
                 "I contributed to a customer research project and prepared the "
                 "final report for our team."
             ),
+            user_intent_zh=None,
+            code_switching_tip=None,
             score=74,
         )
 
@@ -130,6 +205,8 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
             corrected_sentence=corrected,
             issue="Use polite request forms and natural restaurant wording.",
             better_expression="I'd like a chicken sandwich, please. Could you recommend a drink for me?",
+            user_intent_zh=None,
+            code_switching_tip=None,
             score=82,
         )
 
@@ -145,6 +222,8 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
                 "The main blocker is that I need the backend team to confirm the "
                 "API response format."
             ),
+            user_intent_zh=None,
+            code_switching_tip=None,
             score=76,
         )
 
@@ -152,6 +231,8 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
         corrected_sentence=message,
         issue=f"No major grammar issue for the {scenario.title.lower()} scenario.",
         better_expression=_default_better_expression(scenario.id),
+        user_intent_zh=None,
+        code_switching_tip=None,
         score=88,
     )
 
@@ -194,6 +275,7 @@ def create_summary(request: SummaryRequest) -> SummaryResponse:
             "Add one more specific detail or follow-up question next time."
         ),
         next_practice_focus=_next_focus(scenario.id),
+        code_switching_advice=_summary_code_switching_advice(request.messages),
         scores=ScoreBreakdown(
             grammar=grammar,
             expression=expression,
@@ -205,6 +287,8 @@ def create_summary(request: SummaryRequest) -> SummaryResponse:
 
 
 def _scenario_for(scenario_id: str) -> Scenario:
+    if scenario_id == "restaurant-ordering":
+        scenario_id = "restaurant"
     return SCENARIOS.get(scenario_id, SCENARIOS["interview"])
 
 
@@ -230,12 +314,30 @@ def _scenario_reply(scenario_id: str, user_message: str) -> str:
         )
 
     if scenario_id == "meeting":
+        if "预约" in user_message or "schedule" in lowered or "meeting tomorrow" in lowered:
+            return (
+                "That sounds like a scheduling topic. What time works best for the "
+                "meeting tomorrow, and who needs to join?"
+            )
         if "api" in lowered or "blocker" in lowered:
             return (
                 "Thanks for the update. It sounds like the API format is blocking you. "
                 "What specific data fields do you need from the backend team?"
             )
         return "Thanks for the update. What is your main blocker or next step for this week?"
+
+    if scenario_id == "travel":
+        if "check in" in lowered or "booking" in lowered or "reservation" in lowered:
+            return (
+                "Let me check that for you. Could I have your name and a sample booking "
+                "number, please?"
+            )
+        return "Sure, I can help with that. What destination or travel detail do you need?"
+
+    if scenario_id == "daily_conversation":
+        if "movie" in lowered:
+            return "That sounds relaxing. What movie did you watch, and did you enjoy it?"
+        return "That sounds good. Could you tell me a little more about your day?"
 
     if "project" in lowered or "experience" in lowered:
         return (
@@ -252,7 +354,10 @@ def _default_better_expression(scenario_id: str) -> str:
     expressions = {
         "interview": "I contributed to this project by preparing the final report.",
         "restaurant": "I'd like to order this without onions, please.",
+        "ordering_food": "I'd like to order this without onions, please.",
         "meeting": "The main blocker is the API response format.",
+        "travel": "I have a reservation here, but I arrived early. Is early check-in available?",
+        "daily_conversation": "After work, I relaxed at home and watched a movie.",
     }
     return expressions.get(scenario_id, expressions["interview"])
 
@@ -262,7 +367,10 @@ def _scenario_completion_score(scenario_id: str, text: str, turn_count: int) -> 
     keywords = {
         "interview": ["experience", "project", "interested", "role"],
         "restaurant": ["order", "sandwich", "drink", "please"],
+        "ordering_food": ["order", "sandwich", "drink", "please"],
         "meeting": ["finished", "blocker", "api", "next"],
+        "travel": ["reservation", "booking", "direction", "help"],
+        "daily_conversation": ["day", "work", "movie", "usually"],
     }
     score += sum(4 for keyword in keywords.get(scenario_id, []) if keyword in text)
     return min(score, 95)
@@ -278,9 +386,21 @@ def _repeated_issues(scenario_id: str) -> list[str]:
             "Use polite forms such as 'I'd like' and 'Could I have'.",
             "Check articles and singular or plural nouns when ordering.",
         ],
+        "ordering_food": [
+            "Use polite forms such as 'I'd like' and 'Could I have'.",
+            "Check articles and singular or plural nouns when ordering.",
+        ],
         "meeting": [
             "Use articles with workplace nouns such as 'the API'.",
             "Use 'need someone to do something' for requests.",
+        ],
+        "travel": [
+            "Use polite travel requests such as 'Could you tell me...'.",
+            "Check articles and prepositions in travel phrases.",
+        ],
+        "daily_conversation": [
+            "Use past tense for completed daily activities.",
+            "Add articles before singular countable nouns such as 'a movie'.",
         ],
     }
     return issues.get(scenario_id, issues["interview"])
@@ -298,10 +418,25 @@ def _summary_expressions(scenario_id: str) -> list[str]:
             "Could I have...",
             "Does this come with...",
         ],
+        "ordering_food": [
+            "I'd like...",
+            "Could I have...",
+            "Does this come with...",
+        ],
         "meeting": [
             "The main blocker is that I need the backend team to confirm the API response format.",
             "Could you clarify the expected fields?",
             "I'll follow up by the end of today.",
+        ],
+        "travel": [
+            "I have a reservation...",
+            "Could you tell me how to get to...",
+            "Is it possible to...?",
+        ],
+        "daily_conversation": [
+            "I usually...",
+            "Recently I've been...",
+            "That sounds interesting because...",
         ],
     }
     return expressions.get(scenario_id, expressions["interview"])
@@ -312,5 +447,53 @@ def _next_focus(scenario_id: str) -> str:
         "interview": "Practice answering with one concrete example and one measurable result.",
         "restaurant": "Practice polite ordering phrases and confirming details.",
         "meeting": "Practice a progress, blocker, and next-step update structure.",
+        "ordering_food": "Practice polite ordering phrases and confirming details.",
+        "travel": "Practice polite travel requests and confirming key details.",
+        "daily_conversation": "Practice adding one detail and one follow-up question in casual English.",
     }
     return focuses.get(scenario_id, focuses["interview"])
+
+
+def _contains_chinese(text: str) -> bool:
+    return any("\u4e00" <= character <= "\u9fff" for character in text)
+
+
+def _mixed_language_intent(message: str) -> str:
+    if _mentions_scheduling_meeting(message):
+        return "我想约一个明天的会议。"
+    return message
+
+
+def _mixed_language_expression(scenario_id: str, message: str) -> str:
+    if _mentions_scheduling_meeting(message):
+        return "I want to schedule a meeting for tomorrow."
+    if scenario_id in {"restaurant", "ordering_food"}:
+        return "I'd like to order this, please."
+    if scenario_id == "travel":
+        return "I need help with my travel plans."
+    if scenario_id == "daily_conversation":
+        return "After work, I relaxed at home and watched a movie."
+    return get_scenario_prompt_config(scenario_id).useful_expressions[0]
+
+
+def _code_switching_tip(message: str, expression: str) -> str:
+    if _mentions_scheduling_meeting(message):
+        return f"把“预约一个 meeting”整体换成自然英文：{expression}"
+    return f"先保留你的意思，再把中文部分换成完整英文：{expression}"
+
+
+def _summary_code_switching_advice(messages: list[ChatMessage]) -> str | None:
+    mixed_turns = [message for message in messages if message.role == "user" and _contains_chinese(message.content)]
+    if not mixed_turns:
+        return None
+    return (
+        "你已经能把想法说出来。下次可以先抓住中文里的核心动作，"
+        "例如“预约”对应 schedule，然后组合成完整英文句子。"
+    )
+
+
+def _mentions_scheduling_meeting(message: str) -> bool:
+    lowered = message.lower()
+    has_schedule_word = "预约" in message or "约" in message or "schedule" in lowered
+    has_meeting_word = "meeting" in lowered or "会议" in message
+    return has_schedule_word and has_meeting_word

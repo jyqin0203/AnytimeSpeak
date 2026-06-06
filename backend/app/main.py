@@ -1,7 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.mock_service import create_chat_reply, create_feedback, create_summary, list_scenarios
+from app.llm_provider import (
+    create_chat_reply_with_fallback,
+    create_feedback_with_fallback,
+    create_summary_with_fallback,
+)
+from app.mock_service import list_scenarios
 from app.schemas import (
     ChatRequest,
     ChatResponse,
@@ -48,14 +53,14 @@ def get_scenarios():
 
 @app.post("/api/chat", response_model=ChatResponse)
 def post_chat(request: ChatRequest):
-    return create_chat_reply(request)
+    return create_chat_reply_with_fallback(request)
 
 
 @app.post("/api/feedback", response_model=FeedbackResponse)
 def post_feedback(request: FeedbackRequest):
-    return create_feedback(request)
+    return create_feedback_with_fallback(request)
 
 
 @app.post("/api/summary", response_model=SummaryResponse)
 def post_summary(request: SummaryRequest):
-    return create_summary(request)
+    return create_summary_with_fallback(request)
