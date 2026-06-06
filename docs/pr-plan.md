@@ -2,6 +2,112 @@
 
 This project should be developed through small, focused PRs. Each PR should keep `main` runnable and include a clear description, implementation approach, test method, and dependency/API disclosure.
 
+## Agent PR Submission Guide
+
+This section is the canonical PR workflow for Codex/Coding Agents working on this repository. Follow it before opening any future PR.
+
+### Required Tools
+
+Use local Git plus GitHub CLI. On this Windows machine, the tools may not be available through `PATH`, so use absolute paths first:
+
+```powershell
+& 'C:\Program Files\Git\cmd\git.exe' --version
+& 'C:\Program Files\GitHub CLI\gh.exe' --version
+& 'C:\Program Files\GitHub CLI\gh.exe' auth status
+```
+
+If GitHub CLI is not logged in, ask the repository owner to run:
+
+```powershell
+& 'C:\Program Files\GitHub CLI\gh.exe' auth login
+```
+
+If `gh` reports that it cannot find `git`, fix the current shell session with:
+
+```powershell
+$env:Path = 'C:\Program Files\Git\cmd;' + $env:Path
+```
+
+### Start From Remote Main
+
+Always create a PR branch from `origin/main`. This prevents GitHub compare errors such as "No common ancestor".
+
+```powershell
+& 'C:\Program Files\Git\cmd\git.exe' fetch origin main
+& 'C:\Program Files\Git\cmd\git.exe' switch -c codex/<short-task-name> origin/main
+```
+
+If already on a feature branch, verify it is based on `origin/main` before pushing:
+
+```powershell
+& 'C:\Program Files\Git\cmd\git.exe' merge-base --is-ancestor origin/main HEAD
+& 'C:\Program Files\Git\cmd\git.exe' status --short --branch
+```
+
+### Commit Only The Intended Scope
+
+Inspect the working tree and stage only files that belong to the current small PR.
+
+```powershell
+& 'C:\Program Files\Git\cmd\git.exe' status --short --branch
+& 'C:\Program Files\Git\cmd\git.exe' diff -- <changed-files>
+& 'C:\Program Files\Git\cmd\git.exe' add <changed-files>
+& 'C:\Program Files\Git\cmd\git.exe' commit -m '<type>: <short description>'
+```
+
+Do not use `git add -A` when unrelated local changes exist.
+
+### Push The Branch
+
+```powershell
+& 'C:\Program Files\Git\cmd\git.exe' push -u origin codex/<short-task-name>
+```
+
+### Create The Draft PR
+
+Prepare a Markdown body file that includes the required PR sections, then create the draft PR:
+
+```powershell
+& 'C:\Program Files\GitHub CLI\gh.exe' pr create `
+  --repo jyqin0203/AnytimeSpeak `
+  --base main `
+  --head codex/<short-task-name> `
+  --draft `
+  --title '<type>: <short description>' `
+  --body-file <path-to-pr-body.md>
+```
+
+Every PR body must include:
+
+- Title
+- Feature description
+- Implementation approach
+- Test method
+- Third-party libraries, APIs, or AI-generated code used
+
+### Verify After Creating The PR
+
+```powershell
+& 'C:\Program Files\GitHub CLI\gh.exe' pr view --repo jyqin0203/AnytimeSpeak --web
+& 'C:\Program Files\Git\cmd\git.exe' status --short --branch
+```
+
+Also verify:
+
+- The PR is a draft unless the user requested ready for review.
+- The base branch is `main`.
+- The head branch is `codex/<short-task-name>`.
+- The changed files match the requested scope.
+- No `.env`, API key, token, private credential, or unauthorized asset is included.
+
+### Known Pitfalls
+
+- GitHub connector write actions may return `403 Resource not accessible by integration`; use local Git and `gh` instead.
+- `git` may be installed but missing from `PATH`; use `C:\Program Files\Git\cmd\git.exe`.
+- `gh` may be installed but missing from `PATH`; use `C:\Program Files\GitHub CLI\gh.exe`.
+- `gh pr create` may fail if `gh auth status` is not logged in.
+- Branches created from a local empty commit instead of `origin/main` can fail PR comparison.
+
 ## PR 1: Project Guidelines and Planning Documents
 
 - Add `AGENTS.md`.
