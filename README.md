@@ -65,6 +65,13 @@ Copy `.env.example` to `.env` for local provider configuration when LLM integrat
 
 Demo video link: TBD
 
+Related preparation docs:
+
+- Demo script: `docs/demo-script.md`
+- MVP checklist: `docs/mvp-checklist.md`
+- API contract: `docs/api-contract.md`
+- Submission guide: `docs/submission-guide.md`
+
 ## Originality and Third-Party Dependencies
 
 - Original project code: project scaffold, backend health endpoint, and documentation are maintained in this repository.
