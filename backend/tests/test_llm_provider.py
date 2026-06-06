@@ -95,6 +95,48 @@ def test_llm_provider_uses_openai_api_key_env(monkeypatch: pytest.MonkeyPatch):
     assert response.score == 90
 
 
+def test_llm_provider_defaults_to_qwen_plus_on_alibaba_bailian(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "dashscope-test-key")
+
+    captured_request = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"corrected_sentence":"OK","issue":"说明","better_expression":"OK","score":90}'
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured_request["url"] = url
+        captured_request["json"] = json
+        captured_request["headers"] = headers
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_provider.httpx, "post", fake_post)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="interview", message="I want practice.")
+    )
+
+    assert captured_request["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+    assert captured_request["json"]["model"] == "qwen-plus"
+    assert captured_request["headers"]["Authorization"] == "Bearer dashscope-test-key"
+    assert response.score == 90
+
+
 def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 

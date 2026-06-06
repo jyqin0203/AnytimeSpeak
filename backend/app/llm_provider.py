@@ -19,6 +19,8 @@ from app.schemas import (
 
 
 LLM_TIMEOUT_SECONDS = 20.0
+DEFAULT_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DEFAULT_LLM_MODEL = "qwen-plus"
 
 
 def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
@@ -79,14 +81,11 @@ def _should_use_llm() -> bool:
     if os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower() != "llm":
         return False
 
-    return bool(_llm_api_key()) and all(
-        os.getenv(name, "").strip()
-        for name in ("LLM_BASE_URL", "LLM_MODEL")
-    )
+    return bool(_llm_api_key())
 
 
 def _request_chat_completion(messages: list[dict[str, str]]) -> str:
-    base_url = os.environ["LLM_BASE_URL"].rstrip("/")
+    base_url = _llm_base_url().rstrip("/")
     endpoint = (
         base_url
         if base_url.endswith("/chat/completions")
@@ -100,7 +99,7 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
             "Content-Type": "application/json",
         },
         json={
-            "model": os.environ["LLM_MODEL"],
+            "model": _llm_model(),
             "messages": messages,
             "temperature": 0.3,
             "response_format": {"type": "json_object"},
@@ -114,6 +113,14 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
 
 def _llm_api_key() -> str:
     return os.getenv("OPENAI_API_KEY", "").strip() or os.getenv("LLM_API_KEY", "").strip()
+
+
+def _llm_base_url() -> str:
+    return os.getenv("LLM_BASE_URL", "").strip() or DEFAULT_LLM_BASE_URL
+
+
+def _llm_model() -> str:
+    return os.getenv("LLM_MODEL", "").strip() or DEFAULT_LLM_MODEL
 
 
 def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
