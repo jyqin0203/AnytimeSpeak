@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import sqlite3
 from typing import AsyncGenerator
 
 from fastapi import FastAPI, HTTPException
@@ -6,17 +7,18 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
 from app.history_schemas import (
-    CreateGuestUserRequest,
-    GuestUserResponse,
     SaveSessionRequest,
     SessionDetail,
     SessionListItem,
+    UserCredentialsRequest,
+    UserResponse,
 )
 from app.history_service import (
-    create_guest_user,
-    get_guest_user,
+    get_user,
     get_session_detail,
+    login_user,
     list_user_sessions,
+    register_user,
     save_practice_session,
 )
 from app.llm_provider import (
@@ -100,14 +102,25 @@ def post_summary(request: SummaryRequest):
 
 # ── Guest user endpoints ──────────────────────────────────────────────────────
 
-@app.post("/api/users/guest", response_model=GuestUserResponse)
-def post_guest_user(request: CreateGuestUserRequest):
-    return create_guest_user(request)
+@app.post("/api/users/register", response_model=UserResponse)
+def post_register_user(request: UserCredentialsRequest):
+    try:
+        return register_user(request)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Username already exists") from exc
 
 
-@app.get("/api/users/{user_id}", response_model=GuestUserResponse)
-def get_user(user_id: str):
-    user = get_guest_user(user_id)
+@app.post("/api/users/login", response_model=UserResponse)
+def post_login_user(request: UserCredentialsRequest):
+    user = login_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return user
+
+
+@app.get("/api/users/{user_id}", response_model=UserResponse)
+def get_user_by_id(user_id: str):
+    user = get_user(user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
@@ -117,7 +130,7 @@ def get_user(user_id: str):
 
 @app.post("/api/history/sessions", response_model=SessionListItem)
 def post_history_session(request: SaveSessionRequest):
-    user = get_guest_user(request.user_id)
+    user = get_user(request.user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return save_practice_session(request)

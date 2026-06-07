@@ -15,15 +15,16 @@ import {
 } from "./api/coaching";
 import {
   clearStoredUser,
-  createGuestUser,
   fetchSessionDetail,
   fetchSessionHistory,
   formatDateTime,
   loadStoredUser,
+  loginUser,
   providerLabel,
+  registerUser,
   saveSessionHistory,
   storeUser,
-  type GuestUser,
+  type AuthUser,
   type HistorySessionDetail,
   type HistorySessionItem,
   type SaveHistoryPayload,
@@ -65,7 +66,7 @@ function App() {
   const voiceRecordingsRef = useRef<Record<number, string>>({});
 
   // User profile state
-  const [guestUser, setGuestUser] = useState<GuestUser | null>(() => loadStoredUser());
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() => loadStoredUser());
   const [showProfileModal, setShowProfileModal] = useState(false);
 
   // History state
@@ -211,31 +212,12 @@ function App() {
     void sendText(text, recording);
   };
 
-  // Tries to save to the backend. If the stored user is a local-fallback ID
-  // (created when backend was down), it first syncs the user to the backend.
-  const trySaveHistory = async (
-    user: GuestUser,
-    payload: Omit<SaveHistoryPayload, "userId">,
-  ) => {
-    let effectiveUser = user;
-
-    if (user.userId.startsWith("local_")) {
-      try {
-        const realUser = await createGuestUser(user.displayName);
-        storeUser(realUser);
-        setGuestUser(realUser);
-        effectiveUser = realUser;
-      } catch {
-        setHistorySaveNote("本次总结已生成，但历史记录保存失败（练习服务暂不可用）。");
-        return;
-      }
-    }
-
+  const trySaveHistory = async (user: AuthUser, payload: Omit<SaveHistoryPayload, "userId">) => {
     try {
-      await saveSessionHistory({ ...payload, userId: effectiveUser.userId });
+      await saveSessionHistory({ ...payload, userId: user.userId });
       pendingHistoryRef.current = null;
     } catch {
-      setHistorySaveNote("本次总结已生成，但历史记录保存失败。");
+      setHistorySaveNote("本次总结已生成，但历史记录保存失败。请保持登录，稍后可重新结束练习或重新登录后重试。");
     }
   };
 
@@ -284,22 +266,22 @@ function App() {
     };
     pendingHistoryRef.current = pendingPayload;
 
-    if (guestUser) {
-      await trySaveHistory(guestUser, pendingPayload);
+    if (authUser) {
+      await trySaveHistory(authUser, pendingPayload);
     } else {
-      setHistorySaveNote("创建练习档案即可保存本次练习记录。点击右上角「创建档案」。");
+      setHistorySaveNote("登录或注册后即可保存本次练习记录。点击右上角「登录 / 注册」。");
     }
   };
 
   const openHistory = async () => {
-    if (!guestUser) {
+    if (!authUser) {
       setShowProfileModal(true);
       return;
     }
     setHistoryStatus("loading");
     setView("history");
     try {
-      const items = await fetchSessionHistory(guestUser.userId);
+      const items = await fetchSessionHistory(authUser.userId);
       setHistoryList(items);
       setHistoryStatus("idle");
     } catch {
@@ -321,34 +303,27 @@ function App() {
     }
   };
 
-  const handleCreateProfile = async (displayName: string) => {
-    let createdUser: GuestUser | null = null;
+  const handleAuth = async (mode: "login" | "register", username: string, password: string) => {
+    let nextUser: AuthUser | null = null;
     try {
-      const user = await createGuestUser(displayName);
+      const user = mode === "register" ? await registerUser(username, password) : await loginUser(username, password);
       storeUser(user);
-      setGuestUser(user);
+      setAuthUser(user);
       setShowProfileModal(false);
-      createdUser = user;
+      nextUser = user;
     } catch {
-      const localUser: GuestUser = {
-        userId: `local_${Date.now()}`,
-        displayName,
-        createdAt: new Date().toISOString(),
-      };
-      storeUser(localUser);
-      setGuestUser(localUser);
-      setShowProfileModal(false);
+      setHistorySaveNote(mode === "register" ? "注册失败，请换一个用户名或稍后再试。" : "登录失败，请检查用户名和密码。");
+      return;
     }
 
-    // If we got a real backend user and there's a pending session, save it now.
     const pending = pendingHistoryRef.current;
-    if (createdUser && pending) {
+    if (nextUser && pending) {
       try {
-        await saveSessionHistory({ ...pending, userId: createdUser.userId });
+        await saveSessionHistory({ ...pending, userId: nextUser.userId });
         pendingHistoryRef.current = null;
         setHistorySaveNote(null);
       } catch {
-        setHistorySaveNote("档案创建成功，但历史记录保存失败，请稍后再试。");
+        setHistorySaveNote("登录成功，但本次历史记录保存失败。请稍后再试。");
       }
     }
   };
@@ -382,17 +357,17 @@ function App() {
           >
             练习历史
           </button>
-          {guestUser ? (
+          {authUser ? (
             <button
               className="profile-chip"
               type="button"
-              title="点击退出档案"
+              title="退出登录"
               onClick={() => {
                 clearStoredUser();
-                setGuestUser(null);
+                setAuthUser(null);
               }}
             >
-              {guestUser.displayName}
+              {authUser.username}
             </button>
           ) : (
             <button
@@ -400,7 +375,7 @@ function App() {
               type="button"
               onClick={() => setShowProfileModal(true)}
             >
-              创建档案
+              登录 / 注册
             </button>
           )}
         </div>
@@ -408,7 +383,7 @@ function App() {
 
       {showProfileModal && (
         <ProfileModal
-          onConfirm={(name) => void handleCreateProfile(name)}
+          onConfirm={(mode, username, password) => void handleAuth(mode, username, password)}
           onClose={() => setShowProfileModal(false)}
         />
       )}
@@ -461,8 +436,8 @@ function App() {
         <HistoryList
           items={historyList}
           status={historyStatus}
-          hasUser={!!guestUser}
-          displayName={guestUser?.displayName ?? ""}
+          hasUser={!!authUser}
+          username={authUser?.username ?? ""}
           onDetail={openHistoryDetail}
           onBack={() => setView("home")}
           onCreateProfile={() => setShowProfileModal(true)}
@@ -481,32 +456,57 @@ function App() {
 
 // ── ProfileModal ──────────────────────────────────────────────────────────────
 
-function ProfileModal({ onConfirm, onClose }: { onConfirm: (name: string) => void; onClose: () => void }) {
-  const [name, setName] = useState("");
+function ProfileModal({
+  onConfirm,
+  onClose,
+}: {
+  onConfirm: (mode: "login" | "register", username: string, password: string) => void;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const trimmed = name.trim();
-    if (trimmed) onConfirm(trimmed);
+    const trimmed = username.trim();
+    if (trimmed && password.length >= 6) onConfirm(mode, trimmed, password);
   };
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="创建练习档案">
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="用户登录或注册">
       <div className="modal-card">
-        <h2>创建练习档案</h2>
-        <p>输入昵称即可开始记录练习历史，无需注册或密码。</p>
+        <h2>{mode === "login" ? "登录练习档案" : "创建练习档案"}</h2>
+        <p>使用用户名和密码保存练习历史。退出后重新登录，也可以继续查看自己的记录。</p>
+        <div className="auth-mode-row">
+          <button className={mode === "login" ? "active" : ""} type="button" onClick={() => setMode("login")}>
+            登录
+          </button>
+          <button className={mode === "register" ? "active" : ""} type="button" onClick={() => setMode("register")}>
+            注册
+          </button>
+        </div>
         <form onSubmit={submit}>
-          <label htmlFor="profile-name">你的昵称</label>
+          <label htmlFor="profile-username">用户名</label>
           <input
-            id="profile-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="例如：Jiaying"
+            id="profile-username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="例如：jiaying"
             maxLength={50}
             autoFocus
           />
+          <label htmlFor="profile-password">密码</label>
+          <input
+            id="profile-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="至少 6 位"
+            type="password"
+            maxLength={128}
+          />
           <div className="modal-actions">
-            <button className="primary-button" type="submit" disabled={!name.trim()}>
-              确认创建
+            <button className="primary-button" type="submit" disabled={!username.trim() || password.length < 6}>
+              {mode === "login" ? "登录" : "注册并登录"}
             </button>
             <button className="secondary-button" type="button" onClick={onClose}>
               取消
@@ -524,7 +524,7 @@ function HistoryList({
   items,
   status,
   hasUser,
-  displayName,
+  username,
   onDetail,
   onBack,
   onCreateProfile,
@@ -532,7 +532,7 @@ function HistoryList({
   items: HistorySessionItem[];
   status: AsyncState;
   hasUser: boolean;
-  displayName: string;
+  username: string;
   onDetail: (sessionId: string) => void;
   onBack: () => void;
   onCreateProfile: () => void;
@@ -542,7 +542,7 @@ function HistoryList({
       <div className="history-header">
         <div>
           <h1>练习历史</h1>
-          {hasUser && <p className="history-user">档案：{displayName}</p>}
+          {hasUser && <p className="history-user">用户：{username}</p>}
         </div>
         <button className="secondary-button" type="button" onClick={onBack}>
           返回首页
@@ -553,7 +553,7 @@ function HistoryList({
         <div className="history-no-user">
           <p>还没有练习档案。创建昵称后，练习记录将自动保存。</p>
           <button className="primary-button" type="button" onClick={onCreateProfile}>
-            创建练习档案
+            登录 / 注册
           </button>
         </div>
       )}

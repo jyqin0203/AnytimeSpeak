@@ -1275,6 +1275,7 @@ dd {
   font-weight: 900;
   color: var(--muted);
   margin-bottom: 0.4rem;
+  margin-top: 0.75rem;
 }
 
 .modal-card input {
@@ -1291,6 +1292,30 @@ dd {
   display: flex;
   gap: 0.6rem;
   margin-top: 0.5rem;
+}
+
+.auth-mode-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.auth-mode-row button {
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: 0.65rem;
+  color: #6d3b75;
+  background: transparent;
+  font-weight: 900;
+}
+
+.auth-mode-row button.active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--pink), #b86be8);
 }
 
 /* History pages */

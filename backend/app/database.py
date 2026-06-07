@@ -1,13 +1,15 @@
 import sqlite3
+import os
 from pathlib import Path
 
 DB_DIR = Path(__file__).parent.parent / "data"
-DB_PATH = DB_DIR / "anytimespeak.db"
+DB_PATH = Path(os.environ.get("ANYTIMESPEAK_DB_PATH", DB_DIR / "anytimespeak.db"))
 
 _CREATE_TABLES_SQL = """
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    display_name TEXT NOT NULL,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
 
@@ -50,7 +52,7 @@ CREATE TABLE IF NOT EXISTS feedbacks (
 
 
 def get_connection() -> sqlite3.Connection:
-    DB_DIR.mkdir(parents=True, exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -60,4 +62,46 @@ def get_connection() -> sqlite3.Connection:
 
 def init_db() -> None:
     with get_connection() as conn:
+        _migrate_legacy_users_table(conn)
         conn.executescript(_CREATE_TABLES_SQL)
+
+
+def _migrate_legacy_users_table(conn: sqlite3.Connection) -> None:
+    table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+    ).fetchone()
+    if table is None:
+        return
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+    if {"username", "password_hash"}.issubset(columns):
+        return
+
+    legacy_rows = conn.execute("SELECT id, display_name, created_at FROM users").fetchall()
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("ALTER TABLE users RENAME TO users_legacy_guest")
+    conn.execute(
+        """CREATE TABLE users (
+            id TEXT PRIMARY KEY,
+            username TEXT NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )"""
+    )
+
+    used_usernames: set[str] = set()
+    for row in legacy_rows:
+        base = "".join(ch.lower() for ch in str(row["display_name"]).strip() if ch.isalnum()) or "legacy"
+        username = base[:44]
+        suffix = 1
+        while username in used_usernames:
+            suffix += 1
+            username = f"{base[:40]}{suffix}"
+        used_usernames.add(username)
+        conn.execute(
+            "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+            (row["id"], username, "legacy_guest_password_disabled", row["created_at"]),
+        )
+
+    conn.execute("DROP TABLE users_legacy_guest")
+    conn.execute("PRAGMA foreign_keys=ON")

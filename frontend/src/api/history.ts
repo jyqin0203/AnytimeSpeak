@@ -1,11 +1,11 @@
 import type { Feedback, Message, Scenario, SessionSummary } from "./coaching";
 
 const STORAGE_USER_ID = "anytime_user_id";
-const STORAGE_DISPLAY_NAME = "anytime_display_name";
+const STORAGE_USERNAME = "anytime_username";
 
-export type GuestUser = {
+export type AuthUser = {
   userId: string;
-  displayName: string;
+  username: string;
   createdAt: string;
 };
 
@@ -38,25 +38,23 @@ export type HistorySessionDetail = {
   }[];
 };
 
-// ── localStorage helpers ──────────────────────────────────────────────────────
-
-export function loadStoredUser(): GuestUser | null {
+export function loadStoredUser(): AuthUser | null {
   try {
     const userId = localStorage.getItem(STORAGE_USER_ID);
-    const displayName = localStorage.getItem(STORAGE_DISPLAY_NAME);
-    if (userId && displayName) {
-      return { userId, displayName, createdAt: "" };
+    const username = localStorage.getItem(STORAGE_USERNAME);
+    if (userId && username) {
+      return { userId, username, createdAt: "" };
     }
   } catch {
-    // localStorage may be unavailable in some environments
+    // localStorage may be unavailable in some environments.
   }
   return null;
 }
 
-export function storeUser(user: GuestUser): void {
+export function storeUser(user: AuthUser): void {
   try {
     localStorage.setItem(STORAGE_USER_ID, user.userId);
-    localStorage.setItem(STORAGE_DISPLAY_NAME, user.displayName);
+    localStorage.setItem(STORAGE_USERNAME, user.username);
   } catch {
     // ignore
   }
@@ -65,13 +63,11 @@ export function storeUser(user: GuestUser): void {
 export function clearStoredUser(): void {
   try {
     localStorage.removeItem(STORAGE_USER_ID);
-    localStorage.removeItem(STORAGE_DISPLAY_NAME);
+    localStorage.removeItem(STORAGE_USERNAME);
   } catch {
     // ignore
   }
 }
-
-// ── API helpers ───────────────────────────────────────────────────────────────
 
 const API_BASE = (() => {
   const raw = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -79,10 +75,7 @@ const API_BASE = (() => {
   return raw.endsWith("/") ? raw.slice(0, -1) : raw;
 })();
 
-async function historyRequest<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
+async function historyRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 15000);
   try {
@@ -98,28 +91,32 @@ async function historyRequest<T>(
   }
 }
 
-// ── Guest user API ────────────────────────────────────────────────────────────
-
-type ApiGuestUser = {
+type ApiAuthUser = {
   user_id: string;
-  display_name: string;
+  username: string;
   created_at: string;
 };
 
-export async function createGuestUser(displayName: string): Promise<GuestUser> {
-  const data = await historyRequest<ApiGuestUser>("/api/users/guest", {
+export async function registerUser(username: string, password: string): Promise<AuthUser> {
+  const data = await historyRequest<ApiAuthUser>("/api/users/register", {
     method: "POST",
-    body: JSON.stringify({ display_name: displayName }),
+    body: JSON.stringify({ username, password }),
   });
-  return { userId: data.user_id, displayName: data.display_name, createdAt: data.created_at };
+  return fromApiUser(data);
 }
 
-export async function fetchGuestUser(userId: string): Promise<GuestUser> {
-  const data = await historyRequest<ApiGuestUser>(`/api/users/${encodeURIComponent(userId)}`);
-  return { userId: data.user_id, displayName: data.display_name, createdAt: data.created_at };
+export async function loginUser(username: string, password: string): Promise<AuthUser> {
+  const data = await historyRequest<ApiAuthUser>("/api/users/login", {
+    method: "POST",
+    body: JSON.stringify({ username, password }),
+  });
+  return fromApiUser(data);
 }
 
-// ── History API ───────────────────────────────────────────────────────────────
+export async function fetchUser(userId: string): Promise<AuthUser> {
+  const data = await historyRequest<ApiAuthUser>(`/api/users/${encodeURIComponent(userId)}`);
+  return fromApiUser(data);
+}
 
 type ApiSessionItem = {
   session_id: string;
@@ -161,6 +158,8 @@ export type SaveHistoryPayload = {
 };
 
 export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<HistorySessionItem> {
+  const scoreMap = payload.summary.scores as Record<string, number>;
+  const overallScore = scoreMap["综合"] ?? scoreMap["缁煎悎"] ?? null;
   const body = {
     user_id: payload.userId,
     session_id: payload.sessionId,
@@ -193,9 +192,9 @@ export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<H
     },
     scores: {
       ...payload.summary.scores,
-      overall: payload.summary.scores["综合"],
+      overall: overallScore,
     },
-    overall_score: payload.summary.scores["综合"] ?? null,
+    overall_score: overallScore,
     provider: payload.provider,
   };
 
@@ -208,16 +207,12 @@ export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<H
 }
 
 export async function fetchSessionHistory(userId: string): Promise<HistorySessionItem[]> {
-  const items = await historyRequest<ApiSessionItem[]>(
-    `/api/history/sessions?user_id=${encodeURIComponent(userId)}`,
-  );
+  const items = await historyRequest<ApiSessionItem[]>(`/api/history/sessions?user_id=${encodeURIComponent(userId)}`);
   return items.map(fromApiSessionItem);
 }
 
 export async function fetchSessionDetail(sessionId: string): Promise<HistorySessionDetail> {
-  const data = await historyRequest<ApiSessionDetail>(
-    `/api/history/sessions/${encodeURIComponent(sessionId)}`,
-  );
+  const data = await historyRequest<ApiSessionDetail>(`/api/history/sessions/${encodeURIComponent(sessionId)}`);
   return {
     sessionId: data.session_id,
     scenarioId: data.scenario_id,
@@ -235,6 +230,14 @@ export async function fetchSessionDetail(sessionId: string): Promise<HistorySess
       feedbackJson: f.feedback_json,
       score: f.score,
     })),
+  };
+}
+
+function fromApiUser(data: ApiAuthUser): AuthUser {
+  return {
+    userId: data.user_id,
+    username: data.username,
+    createdAt: data.created_at,
   };
 }
 

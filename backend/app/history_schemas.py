@@ -3,13 +3,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-class CreateGuestUserRequest(BaseModel):
-    display_name: str = Field(min_length=1, max_length=50)
+class UserCredentialsRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=6, max_length=128)
 
 
-class GuestUserResponse(BaseModel):
+class UserResponse(BaseModel):
     user_id: str
-    display_name: str
+    username: str
     created_at: str
 
 

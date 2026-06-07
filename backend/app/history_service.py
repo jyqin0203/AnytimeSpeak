@@ -1,45 +1,92 @@
 import json
+import hashlib
+import hmac
+import os
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.database import get_connection
 from app.history_schemas import (
-    CreateGuestUserRequest,
     FeedbackRecord,
-    GuestUserResponse,
     MessageRecord,
     SaveSessionRequest,
     SessionDetail,
     SessionListItem,
+    UserCredentialsRequest,
+    UserResponse,
 )
 
+_PBKDF2_ITERATIONS = 120_000
 
-def create_guest_user(request: CreateGuestUserRequest) -> GuestUserResponse:
+
+def _normalize_username(username: str) -> str:
+    return username.strip().lower()
+
+
+def _hash_password(password: str) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${_PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        algorithm, iterations_raw, salt_hex, digest_hex = stored_hash.split("$", 3)
+        if algorithm != "pbkdf2_sha256":
+            return False
+        iterations = int(iterations_raw)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(digest_hex)
+    except (ValueError, TypeError):
+        return False
+
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(actual, expected)
+
+
+def register_user(request: UserCredentialsRequest) -> UserResponse:
     user_id = f"user_{uuid4().hex[:12]}"
+    username = _normalize_username(request.username)
     created_at = datetime.now(timezone.utc).isoformat()
     with get_connection() as conn:
         conn.execute(
-            "INSERT INTO users (id, display_name, created_at) VALUES (?, ?, ?)",
-            (user_id, request.display_name.strip(), created_at),
+            "INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)",
+            (user_id, username, _hash_password(request.password), created_at),
         )
-    return GuestUserResponse(
+    return UserResponse(
         user_id=user_id,
-        display_name=request.display_name.strip(),
+        username=username,
         created_at=created_at,
     )
 
 
-def get_guest_user(user_id: str) -> GuestUserResponse | None:
+def login_user(request: UserCredentialsRequest) -> UserResponse | None:
+    username = _normalize_username(request.username)
     with get_connection() as conn:
         row = conn.execute(
-            "SELECT id, display_name, created_at FROM users WHERE id = ?",
+            "SELECT id, username, password_hash, created_at FROM users WHERE username = ?",
+            (username,),
+        ).fetchone()
+    if row is None or not _verify_password(request.password, row["password_hash"]):
+        return None
+    return UserResponse(
+        user_id=row["id"],
+        username=row["username"],
+        created_at=row["created_at"],
+    )
+
+
+def get_user(user_id: str) -> UserResponse | None:
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT id, username, created_at FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
     if row is None:
         return None
-    return GuestUserResponse(
+    return UserResponse(
         user_id=row["id"],
-        display_name=row["display_name"],
+        username=row["username"],
         created_at=row["created_at"],
     )
 
@@ -89,6 +136,8 @@ def save_practice_session(request: SaveSessionRequest) -> SessionListItem:
                 request.provider,
             ),
         )
+        conn.execute("DELETE FROM messages WHERE session_id = ?", (request.session_id,))
+        conn.execute("DELETE FROM feedbacks WHERE session_id = ?", (request.session_id,))
 
         for msg in request.messages:
             conn.execute(
