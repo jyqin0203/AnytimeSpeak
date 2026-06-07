@@ -100,11 +100,14 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
         return
 
     uid = f"anytimespeak_{uuid.uuid4().hex[:8]}"
-    # resource_id goes as URL query param — required by the v3/bigmodel endpoint
-    url = f"{DOUBAO_ASR_URL}?resource_id={resource_id}"
+    # v3/bigmodel auth headers (confirmed via official docs):
+    # X-Api-App-Key, X-Api-Access-Key, X-Api-Resource-Id, X-Api-Connect-Id
+    url = DOUBAO_ASR_URL
     headers = {
-        "Authorization": f"Bearer {token}",
-        "X-App-Id": app_id,
+        "X-Api-App-Key": app_id,
+        "X-Api-Access-Key": token,
+        "X-Api-Resource-Id": resource_id,
+        "X-Api-Connect-Id": uid,
     }
 
     init_payload = {
@@ -124,7 +127,6 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
     }
 
     try:
-        # websockets >= 14.x uses additional_headers (not extra_headers)
         async with websockets.connect(url, additional_headers=headers, open_timeout=8) as doubao_ws:
             await doubao_ws.send(json.dumps(init_payload))
             await frontend_ws.send_text(json.dumps({"type": "ready"}))
