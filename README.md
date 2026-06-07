@@ -18,12 +18,14 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 - Backend: FastAPI + Python
 - Speech input: browser `SpeechRecognition`
 - Speech playback: browser `SpeechSynthesis`
-- MVP storage: frontend state and backend in-memory mock sessions
+- Storage: SQLite for guest profiles and practice history; backend in-memory sessions for the active coaching flow
 - AI integration: environment-variable based LLM configuration with mock mode fallback
 
 ## Current Status
 
 The project includes a mock-first MVP practice loop: scenario selection with static story seeds (each scenario ships at least three hand-written story intros, randomly selected per session or pinned via `story_seed_id`), session-based role-play chat, latest-turn feedback with a `grammar`/`naturalness`/`relevance`/`clarity` score breakdown, post-session summary, scoring, browser speech input/playback, user recording replay, and text input fallback. The UI is Chinese-first for instructions and feedback labels while keeping practice content, AI role-play replies, and recommended English expressions in English. The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching — every feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key.
+
+Guest profiles and practice history are now supported. Users enter a nickname to create a lightweight profile (no password or OAuth). The backend stores profiles, session messages, per-turn feedback, and post-session summaries in a local SQLite database (`backend/data/anytimespeak.db`). After each practice session the frontend automatically saves the record; users can browse their history and review full session details including dialogue, feedback, and scores. If the backend is unavailable when the session ends, the save is deferred and completed automatically the next time the user creates or reconnects a profile.
 
 ## Local Development
 

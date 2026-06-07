@@ -184,7 +184,18 @@ Also verify:
 - Define score calculation rules.
 - Show score history or simple progress indicators.
 
-## PR 13: README, Screenshots, and Demo Video Script
+## PR 13: Guest Profile and Practice History
+
+- Add SQLite database with users, practice_sessions, messages, and feedbacks tables.
+- Add guest profile creation (nickname only, no password or OAuth).
+- Add `POST /api/users/guest` and `GET /api/users/{user_id}`.
+- Add `POST /api/history/sessions`, `GET /api/history/sessions`, and `GET /api/history/sessions/{session_id}`.
+- Auto-save practice history after each session ends; defer and retry if the backend is unavailable.
+- Frontend history list and session detail views.
+- Profile chip and history button in the topbar.
+- Score panel shows `—` before the first turn instead of a hardcoded placeholder.
+
+## PR 14: README, Screenshots, and Demo Video Script
 
 - Update README with final setup and demo steps.
 - Add screenshot references.

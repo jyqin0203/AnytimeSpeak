@@ -1,6 +1,6 @@
 # API Contract
 
-This document records the planned AnytimeSpeak MVP API shape for future frontend and backend integration. The current backend only implements `/api/health`; the other endpoints can be implemented in mock mode first so local demos remain reproducible without private API keys.
+This document records the AnytimeSpeak API shape. The backend implements all coaching endpoints (`/api/health`, `/api/scenarios`, `/api/sessions`, `/api/chat`, `/api/feedback`, `/api/summary`) and the guest profile and practice history endpoints (`/api/users/*`, `/api/history/*`). All coaching endpoints support mock mode so local demos remain reproducible without private API keys.
 
 ## General Rules
 
@@ -285,3 +285,168 @@ Current status: planned. Can calculate deterministic mock scores first.
 4. Add `/api/feedback` if feedback is separated from chat responses.
 5. Add `/api/summary` with mock summaries and scores.
 6. Replace mock internals with provider-backed logic only after the mock demo loop is stable.
+7. Add `/api/users/*` and `/api/history/*` for guest profiles and practice history.
+
+## Guest Profile API
+
+### POST /api/users/guest
+
+Creates a lightweight guest profile. No password or OAuth required.
+
+Current status: implemented.
+
+#### Request Example
+
+```json
+{
+  "display_name": "Jiaying"
+}
+```
+
+#### Response Example
+
+```json
+{
+  "user_id": "user_66ee86e050be",
+  "display_name": "Jiaying",
+  "created_at": "2026-06-07T03:43:38.456180+00:00"
+}
+```
+
+### GET /api/users/{user_id}
+
+Returns the guest user's display name and creation timestamp.
+
+Current status: implemented.
+
+#### Response Example
+
+```json
+{
+  "user_id": "user_66ee86e050be",
+  "display_name": "Jiaying",
+  "created_at": "2026-06-07T03:43:38.456180+00:00"
+}
+```
+
+Returns HTTP 404 when the user does not exist.
+
+## Practice History API
+
+Session records are stored in SQLite. Messages and per-turn feedback are saved individually. The post-session summary is stored as a JSON column.
+
+### POST /api/history/sessions
+
+Saves a completed practice session including messages, feedback, and summary. Returns HTTP 404 if `user_id` is not found.
+
+Current status: implemented.
+
+#### Request Example
+
+```json
+{
+  "user_id": "user_66ee86e050be",
+  "session_id": "session_abc123",
+  "scenario_id": "interview",
+  "scenario_title": "面试沟通",
+  "story_intro_zh": "你正在参加一场面试。",
+  "story_intro_en": "You are joining an interview.",
+  "messages": [
+    { "role": "assistant", "content": "Could you introduce yourself?" },
+    { "role": "user", "content": "I am a software engineer." }
+  ],
+  "feedbacks": [
+    {
+      "user_message": "I am a software engineer.",
+      "feedback_json": { "issue": "Clear answer.", "score_breakdown": {} },
+      "score": 85
+    }
+  ],
+  "summary": {
+    "summary": "Good session.",
+    "strengths": ["Clear introduction."],
+    "repeated_issues": [],
+    "better_expressions": []
+  },
+  "scores": { "overall": 85 },
+  "overall_score": 85,
+  "provider": "mock"
+}
+```
+
+#### Response Example
+
+```json
+{
+  "session_id": "session_abc123",
+  "scenario_id": "interview",
+  "scenario_title": "面试沟通",
+  "started_at": "2026-06-07T03:50:00.000000+00:00",
+  "overall_score": 85,
+  "summary_preview": "Good session.",
+  "provider": "mock"
+}
+```
+
+### GET /api/history/sessions?user_id={user_id}
+
+Returns the user's practice sessions in reverse chronological order (most recent first). Defaults to the 20 most recent records.
+
+Current status: implemented.
+
+#### Response Example
+
+```json
+[
+  {
+    "session_id": "session_abc123",
+    "scenario_id": "interview",
+    "scenario_title": "面试沟通",
+    "started_at": "2026-06-07T03:50:00.000000+00:00",
+    "overall_score": 85,
+    "summary_preview": "Good session.",
+    "provider": "mock"
+  }
+]
+```
+
+### GET /api/history/sessions/{session_id}
+
+Returns the full detail of a saved practice session: scenario info, all messages, all feedback records, and the summary JSON.
+
+Current status: implemented.
+
+#### Response Example
+
+```json
+{
+  "session_id": "session_abc123",
+  "scenario_id": "interview",
+  "scenario_title": "面试沟通",
+  "story_intro_zh": "你正在参加一场面试。",
+  "story_intro_en": "You are joining an interview.",
+  "started_at": "2026-06-07T03:50:00.000000+00:00",
+  "ended_at": "2026-06-07T03:55:00.000000+00:00",
+  "overall_score": 85,
+  "summary_json": {
+    "summary": "Good session.",
+    "strengths": ["Clear introduction."],
+    "repeated_issues": [],
+    "better_expressions": []
+  },
+  "provider": "mock",
+  "messages": [
+    { "role": "assistant", "content": "Could you introduce yourself?" },
+    { "role": "user", "content": "I am a software engineer." }
+  ],
+  "feedbacks": [
+    {
+      "user_message": "I am a software engineer.",
+      "feedback_json": { "issue": "Clear answer." },
+      "score": 85
+    }
+  ]
+}
+```
+
+Returns HTTP 404 when the session does not exist.
