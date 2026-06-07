@@ -1,135 +1,41 @@
-# API Contract
+﻿# API Contract
 
-This document records the current AnytimeSpeak API shape. The current `main` branch implements the session-based coaching endpoints: `/api/health`, `/api/scenarios`, `/api/sessions`, `/api/chat`, `/api/feedback`, and `/api/summary`.
-
-Guest Profile and Practice History endpoints are planned in PR13 / active iteration, but they are not part of the current `main` API unless that PR has been merged.
+This document records the AnytimeSpeak API shape. The backend implements all coaching endpoints (`/api/health`, `/api/scenarios`, `/api/sessions`, `/api/chat`, `/api/feedback`, `/api/summary`) and the guest profile and practice history endpoints (`/api/users/*`, `/api/history/*`). All coaching endpoints support mock mode so local demos remain reproducible without private API keys.
 
 ## General Rules
 
 - Base path: `/api`
 - Request and response bodies use JSON.
-- Coaching endpoints use snake_case JSON fields.
+- Mock mode is acceptable for all MVP endpoints until provider integration is added.
+- Current coaching endpoints use snake_case JSON fields.
 - Session-based coaching requests carry `scenario_id`, `latest_user_message`, and `conversation_history` so the backend can inject the scenario story, roles, goal, and previous turns into prompts.
 - `/api/feedback` evaluates only `latest_user_message`; `conversation_history` is context only.
 - Mock responses should be deterministic enough for demo recording.
 - API keys, provider tokens, and `.env` contents must never be returned to the frontend.
-- Error responses should use a predictable shape.
+- Error responses should use a predictable shape:
 
 ```json
 {
   "error": {
     "code": "invalid_request",
-    "message": "scenario_id is required."
+    "message": "scenarioId is required."
   }
 }
 ```
 
-## Provider And Fallback Semantics
+## Current Session-Based Coaching Contract
 
-`provider` is an informational string returned by `/api/chat`, `/api/feedback`, `/api/summary`, and chat `quick_feedback`.
+`POST /api/sessions` starts a practice session in backend memory. The request body carries `scenario_id` and an optional `story_seed_id`. Each scenario ships with at least three static story seeds; when `story_seed_id` is omitted, the backend randomly selects one of the scenario's seeds, and when it is provided, that exact seed is used (useful for deterministic demos and tests). The response returns `session_id`, `scenario_id`, the full `scenario` config, `story_seed_id`, `story_intro_zh`, `story_intro_en`, `opening_message`, empty `messages`, and `created_at`. Story intros are static, hand-written seeds 鈥?the backend never asks an LLM to invent a new story per request.
 
-- `"llm"` means the backend successfully generated the result through the configured LLM provider.
-- `"mock"` means the backend returned deterministic mock coaching, either because `LLM_PROVIDER_MODE` is not `llm`, required provider env vars are missing, or the live provider call failed.
-- `fallback_reason` may explain why the backend used mock mode. It must not include secrets, raw API keys, full request payloads, or raw provider error text.
+Scenario objects now include `scenario_id`, `title`, `title_zh`, `ai_role`, `user_role`, `goal`, `story_seed_id`, `story_intro_zh`, `story_intro_en`, `opening_line`/`opening_message`, `conversation_style`, `feedback_focus`, and `useful_expressions`. `story_seed_id`/`story_intro_zh`/`story_intro_en` reflect the scenario's default seed; the seed actually used for a given session is echoed back on the `/api/sessions` response.
 
-This is different from the frontend local fallback. Backend mock fallback still means the frontend reached the backend and received a valid API response. Frontend local fallback means the browser could not use the backend response for that call, for example because the backend was unavailable, timed out, returned an error, or returned invalid JSON. Frontend local fallback is a UI resilience behavior, not a backend API provider value.
-
-## Current Implemented Coaching Contract
-
-### GET /api/health
-
-Checks whether the backend service is running.
-
-Current status: implemented.
-
-Response example:
+`POST /api/chat` request shape:
 
 ```json
 {
-  "status": "ok"
-}
-```
-
-### GET /api/scenarios
-
-Returns the scenario list shown by the frontend. The current backend returns a JSON array, not an object wrapper. The stable scenarios include Interview, Restaurant Ordering, and Meeting; additional scenarios may also be present after those core paths.
-
-Current status: implemented.
-
-Response example:
-
-```json
-[
-  {
-    "id": "interview",
-    "scenario_id": "interview",
-    "title": "Interview",
-    "title_zh": "面试",
-    "level": "Intermediate",
-    "ai_role": "Hiring manager",
-    "user_role": "Job candidate",
-    "goal": "Practice introducing yourself, explaining experience, and asking professional follow-up questions.",
-    "story_seed_id": "interview_first_round",
-    "story_intro_zh": "你正在参加一场初级岗位的视频面试...",
-    "story_intro_en": "You are taking part in a video interview for an entry-level role...",
-    "opening_line": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?",
-    "opening_message": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?",
-    "conversation_style": "Professional and supportive.",
-    "feedback_focus": ["grammar", "naturalness", "scenario fit"],
-    "useful_expressions": ["I contributed to...", "One challenge I faced was..."]
-  }
-]
-```
-
-### POST /api/sessions
-
-Starts a practice session in backend memory. Each scenario ships with multiple static story seeds. When `story_seed_id` is omitted, the backend selects one of the scenario seeds; when provided, the backend uses that exact seed for deterministic demos and tests.
-
-Current status: implemented.
-
-Request example:
-
-```json
-{
+  "session_id": "session_demo",
   "scenario_id": "meeting",
-  "story_seed_id": "meeting_standup"
-}
-```
-
-Response example:
-
-```json
-{
-  "session_id": "session_abc123",
-  "scenario_id": "meeting",
-  "scenario": {
-    "id": "meeting",
-    "scenario_id": "meeting",
-    "title": "Meeting",
-    "title_zh": "会议"
-  },
-  "story_seed_id": "meeting_standup",
-  "story_intro_zh": "你正在参加一个简短的团队站会...",
-  "story_intro_en": "You are joining a short team stand-up meeting...",
-  "opening_message": "Let's start with your update. What progress have you made since our last meeting?",
-  "messages": [],
-  "created_at": "2026-06-07T03:50:00.000000+00:00"
-}
-```
-
-### POST /api/chat
-
-Sends the latest user message and receives the next role-play reply. The backend keeps the reply grounded in the selected scenario, story seed, and conversation history.
-
-Current status: implemented.
-
-Request example:
-
-```json
-{
-  "session_id": "session_abc123",
-  "scenario_id": "meeting",
-  "latest_user_message": "I finished the first version, but I have some problem with API.",
+  "latest_user_message": "I want to 棰勭害涓€涓?meeting tomorrow.",
   "conversation_history": [
     {
       "role": "assistant",
@@ -139,187 +45,340 @@ Request example:
 }
 ```
 
-Response example:
+`POST /api/feedback` uses the same `session_id`, `scenario_id`, `latest_user_message`, and `conversation_history` shape. Its response includes `what_you_said`, `user_intent`, `recommended_english`, `issue`, `why`, `more_natural_option`, `score`, `score_breakdown` (an object with integer `grammar`, `naturalness`, `relevance`, and `clarity` fields), and `provider`. Feedback is graded strictly on `latest_user_message`; earlier turns are context only and are never re-scored.
 
-```json
-{
-  "session_id": "session_abc123",
-  "scenario_id": "meeting",
-  "reply": {
-    "role": "assistant",
-    "content": "Thanks for the update. What specific data fields do you need from the backend team?"
-  },
-  "quick_feedback": {
-    "what_you_said": "I finished the first version, but I have some problem with API.",
-    "recommended_english": "I finished the first version, but I have a problem with the API.",
-    "score": 82,
-    "score_breakdown": {
-      "grammar": 80,
-      "naturalness": 82,
-      "relevance": 90,
-      "clarity": 84
-    },
-    "provider": "mock",
-    "fallback_reason": "provider_mode_not_llm"
-  },
-  "provider": "mock",
-  "fallback_reason": "provider_mode_not_llm"
-}
-```
+`POST /api/summary` receives `scenario_id` and full `conversation_history`; summaries and reusable expressions should be tied to the selected scenario goal. Its response also carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show whether the summary was generated by a real LLM call or by the deterministic local fallback, without ever exposing the underlying API key.
 
-### POST /api/feedback
+`provider` is a small string enum returned by `/api/feedback`, `/api/summary`, and the chat endpoint's `quick_feedback`. It is purely informational 鈥?`"llm"` means the response came from a successful real-provider call, `"mock"` means the deterministic rule-based fallback produced it (because `LLM_PROVIDER_MODE` is not `llm`, required env vars are missing, or the live call failed). The backend only ever logs the provider mode and a short fallback-reason summary (e.g. exception type), never the API key, request payload, or raw error text.
 
-Generates latest-turn feedback. It grades only `latest_user_message`; earlier turns are context and are not re-scored.
+## GET /api/health
+
+Checks whether the backend service is running.
 
 Current status: implemented.
 
-Request example:
+### Response Example
 
 ```json
 {
-  "session_id": "session_abc123",
-  "scenario_id": "interview",
-  "latest_user_message": "I am graduated last year and I was responsible for make the report.",
-  "conversation_history": []
+  "status": "ok"
 }
 ```
 
-Response example:
+## GET /api/scenarios
+
+Returns the scenario list shown by the frontend. The MVP scenarios should appear first: Interview, Restaurant Ordering, and Meeting. Additional scenarios can be included after the stable MVP path is complete.
+
+Current status: planned. Can be implemented with static mock data first.
+
+### Response Example
 
 ```json
 {
-  "what_you_said": "I am graduated last year and I was responsible for make the report.",
-  "user_intent": "The learner is describing education and project responsibility.",
-  "recommended_english": "I graduated last year and I was responsible for making the report.",
-  "issue": "Use simple past for a completed graduation event and a gerund after responsible for.",
-  "why": "These forms sound more natural and grammatically correct in an interview answer.",
-  "more_natural_option": "I graduated last year and was responsible for preparing the report.",
-  "score": 78,
-  "score_breakdown": {
-    "grammar": 74,
-    "naturalness": 78,
-    "relevance": 88,
-    "clarity": 80
-  },
-  "provider": "mock",
-  "fallback_reason": "provider_mode_not_llm"
-}
-```
-
-### POST /api/summary
-
-Returns a post-session summary and quantitative scores for the selected scenario.
-
-Current status: implemented.
-
-Request example:
-
-```json
-{
-  "session_id": "session_abc123",
-  "scenario_id": "meeting",
-  "conversation_history": [
+  "scenarios": [
     {
-      "role": "assistant",
-      "content": "Let's start with your update. What progress have you made?"
+      "id": "interview",
+      "title": "Interview",
+      "titleZh": "闈㈣瘯",
+      "level": "Intermediate",
+      "aiRole": "Hiring manager",
+      "userRole": "Job candidate",
+      "goal": "Practice introducing yourself, explaining experience, and asking professional follow-up questions.",
+      "openingLine": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?"
     },
     {
-      "role": "user",
-      "content": "I finished the page, but I have some problem with API."
+      "id": "restaurant-ordering",
+      "title": "Restaurant Ordering",
+      "titleZh": "鐐归",
+      "level": "Beginner to Intermediate",
+      "aiRole": "Restaurant server",
+      "userRole": "Customer",
+      "goal": "Practice ordering food, asking for recommendations, clarifying preferences, and confirming the order.",
+      "openingLine": "Welcome! Are you ready to order, or would you like a few recommendations first?"
+    },
+    {
+      "id": "meeting",
+      "title": "Meeting",
+      "titleZh": "浼氳",
+      "level": "Intermediate",
+      "aiRole": "Team lead",
+      "userRole": "Team member",
+      "goal": "Practice giving updates, discussing blockers, asking for clarification, and agreeing on next steps.",
+      "openingLine": "Let's start with your update. What progress have you made since our last meeting?"
     }
   ]
 }
 ```
 
-Response example:
+## POST /api/chat
+
+Sends a user message and receives the next role-play reply. The endpoint can also return brief per-turn feedback when there is a clear grammar or expression issue.
+
+Current status: planned. Can return mock role-play replies based on `scenarioId`.
+
+### Request Example
 
 ```json
 {
-  "scenario_id": "meeting",
-  "summary": "You completed a short meeting update and described a blocker.",
-  "strengths": ["You gave a relevant progress update."],
-  "repeated_issues": ["Article and preposition use around API-related phrases."],
-  "better_expressions": ["The main blocker is that I need the backend team to confirm the API response format."],
-  "scenario_completion": "The learner shared progress and identified a blocker.",
-  "next_practice_focus": "Practice giving updates with progress, blocker, and next step.",
+  "sessionId": "demo-session-001",
+  "scenarioId": "interview",
+  "messages": [
+    {
+      "id": "msg-001",
+      "role": "assistant",
+      "content": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?"
+    },
+    {
+      "id": "msg-002",
+      "role": "user",
+      "content": "I worked in a team project before and I was responsible to build the frontend page."
+    }
+  ],
+  "mode": "mock"
+}
+```
+
+### Response Example
+
+```json
+{
+  "sessionId": "demo-session-001",
+  "message": {
+    "id": "msg-003",
+    "role": "assistant",
+    "content": "Thanks for sharing that. Could you tell me more about the frontend work and how it helped the project?"
+  },
+  "quickFeedback": {
+    "grammar": {
+      "original": "responsible to build",
+      "suggestion": "responsible for building",
+      "reason": "After responsible for, use a noun or gerund form."
+    },
+    "expression": {
+      "original": "frontend page",
+      "suggestion": "frontend interface",
+      "reason": "Frontend interface sounds more natural when describing product work."
+    },
+    "encouragement": "Your answer is relevant to the interview scenario."
+  },
+  "isMock": true
+}
+```
+
+## POST /api/feedback
+
+Generates grammar and expression feedback for a specific user message or a recent group of turns. This endpoint is useful if the frontend wants feedback separately from the chat reply.
+
+Current status: planned. Can use mock rules before AI provider integration.
+
+### Request Example
+
+```json
+{
+  "sessionId": "demo-session-001",
+  "scenarioId": "interview",
+  "messageId": "msg-002",
+  "content": "I worked in a team project before and I was responsible to build the frontend page.",
+  "mode": "mock"
+}
+```
+
+### Response Example
+
+```json
+{
+  "messageId": "msg-002",
+  "feedback": {
+    "grammar": [
+      {
+        "original": "responsible to build",
+        "suggestion": "responsible for building",
+        "reason": "Use responsible for plus a noun or gerund."
+      }
+    ],
+    "expression": [
+      {
+        "original": "frontend page",
+        "suggestion": "frontend interface",
+        "reason": "This phrase sounds more natural in a professional interview answer."
+      }
+    ],
+    "encouragement": "The meaning is clear, and the example fits the interview goal."
+  },
+  "isMock": true
+}
+```
+
+## POST /api/summary
+
+Ends or reviews a practice session and returns a post-session summary with scores. The frontend can call this after the user selects the end-practice action.
+
+Current status: planned. Can calculate deterministic mock scores first.
+
+### Request Example
+
+```json
+{
+  "sessionId": "demo-session-001",
+  "scenarioId": "interview",
+  "messages": [
+    {
+      "id": "msg-001",
+      "role": "assistant",
+      "content": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?"
+    },
+    {
+      "id": "msg-002",
+      "role": "user",
+      "content": "I worked in a team project before and I was responsible to build the frontend page."
+    },
+    {
+      "id": "msg-003",
+      "role": "assistant",
+      "content": "Thanks for sharing that. Could you tell me more about the frontend work and how it helped the project?"
+    }
+  ],
+  "mode": "mock"
+}
+```
+
+### Response Example
+
+```json
+{
+  "sessionId": "demo-session-001",
+  "summary": {
+    "overallPerformance": "You gave a relevant answer and connected your experience to the interview scenario. Your next step is to make the wording more professional and add a clearer result from the project.",
+    "strengths": [
+      "You answered the interview question directly.",
+      "You used a concrete project example."
+    ],
+    "repeatedIssues": [
+      "Preposition use after phrases such as responsible for.",
+      "Some wording can be more natural for professional settings."
+    ],
+    "betterExpressions": [
+      "I was responsible for building the frontend interface.",
+      "I contributed to a team project focused on user experience.",
+      "This helped our team present the product more clearly."
+    ],
+    "scenarioCompletion": "The learner introduced relevant project experience. A stronger answer would include the project result and one professional follow-up question.",
+    "nextPracticeFocus": "Practice describing one project with action, result, and reflection."
+  },
   "scores": {
     "grammar": 78,
-    "expression": 80,
-    "fluency": 82,
-    "scenario_completion": 84,
-    "overall": 81
+    "expression": 76,
+    "fluency": 80,
+    "scenarioCompletion": 72,
+    "overall": 76
   },
-  "provider": "mock",
-  "fallback_reason": "provider_mode_not_llm"
+  "scoreScale": "0-100",
+  "isMock": true
 }
 ```
 
-## Guest Profile API
+## Endpoint Implementation Order
 
-Guest Profile is a lightweight nickname-based profile design with no password or OAuth. It is planned for PR13 / active iteration and is not implemented on current `main` unless that PR has been merged.
+1. Keep `/api/health` as the smoke test endpoint.
+2. Add `/api/scenarios` with static scenario data.
+3. Add `/api/chat` with deterministic mock role-play replies.
+4. Add `/api/feedback` if feedback is separated from chat responses.
+5. Add `/api/summary` with mock summaries and scores.
+6. Replace mock internals with provider-backed logic only after the mock demo loop is stable.
+7. Add `/api/users/*` and `/api/history/*` for username/password users and practice history.
 
-Current status: planned / in progress outside current `main`.
+## User Auth API
 
-### POST /api/users/guest
+### POST /api/users/register
 
-Creates a lightweight guest profile.
+Creates a user with a unique username and password. No OAuth or complex registration validation is included. The backend stores a salted PBKDF2 password hash.
 
-Planned request example:
+Current status: implemented.
+
+#### Request Example
 
 ```json
 {
-  "display_name": "Jiaying"
+  "username": "jiaying",
+  "password": "lover-demo-13"
 }
 ```
 
-Planned response example:
+#### Response Example
 
 ```json
 {
   "user_id": "user_66ee86e050be",
-  "display_name": "Jiaying",
+  "username": "jiaying",
   "created_at": "2026-06-07T03:43:38.456180+00:00"
 }
 ```
+
+Returns HTTP 409 when the username already exists.
+
+### POST /api/users/login
+
+Authenticates an existing user by username and password.
+
+Current status: implemented.
+
+#### Request Example
+
+```json
+{
+  "username": "jiaying",
+  "password": "lover-demo-13"
+}
+```
+
+#### Response Example
+
+```json
+{
+  "user_id": "user_66ee86e050be",
+  "username": "jiaying",
+  "created_at": "2026-06-07T03:43:38.456180+00:00"
+}
+```
+
+Returns HTTP 401 for invalid credentials.
 
 ### GET /api/users/{user_id}
 
-Returns the guest user's display name and creation timestamp. Returns HTTP 404 when the user does not exist.
+Returns the user's username and creation timestamp.
 
-Planned response example:
+Current status: implemented.
+
+#### Response Example
 
 ```json
 {
   "user_id": "user_66ee86e050be",
-  "display_name": "Jiaying",
+  "username": "jiaying",
   "created_at": "2026-06-07T03:43:38.456180+00:00"
 }
 ```
 
-Planned endpoint summary:
-
-- `POST /api/users/guest`
-- `GET /api/users/{user_id}`
-
+Returns HTTP 404 when the user does not exist.
 ## Practice History API
 
-Practice History is planned to persist completed sessions, messages, per-turn feedback, and summaries in local SQLite. SQLite runtime database files are ignored by `.gitignore` and must not be committed.
-
-Current status: planned / in progress outside current `main`.
+Session records are stored in SQLite. Messages and per-turn feedback are saved individually. The post-session summary is stored as a JSON column.
 
 ### POST /api/history/sessions
 
-Saves a completed practice session including messages, feedback, summary, scores, and provider. Returns HTTP 404 if `user_id` is not found.
+Saves a completed practice session including messages, feedback, and summary. Returns HTTP 404 if `user_id` is not found.
 
-Planned request example:
+Current status: implemented.
+
+#### Request Example
 
 ```json
 {
   "user_id": "user_66ee86e050be",
   "session_id": "session_abc123",
   "scenario_id": "interview",
-  "scenario_title": "Interview",
-  "story_intro_zh": "You are in an interview practice context.",
+  "scenario_title": "闈㈣瘯娌熼€?,
+  "story_intro_zh": "浣犳鍦ㄥ弬鍔犱竴鍦洪潰璇曘€?,
   "story_intro_en": "You are joining an interview.",
   "messages": [
     { "role": "assistant", "content": "Could you introduce yourself?" },
@@ -344,13 +403,13 @@ Planned request example:
 }
 ```
 
-Planned response example:
+#### Response Example
 
 ```json
 {
   "session_id": "session_abc123",
   "scenario_id": "interview",
-  "scenario_title": "Interview",
+  "scenario_title": "闈㈣瘯娌熼€?,
   "started_at": "2026-06-07T03:50:00.000000+00:00",
   "overall_score": 85,
   "summary_preview": "Good session.",
@@ -360,16 +419,18 @@ Planned response example:
 
 ### GET /api/history/sessions?user_id={user_id}
 
-Returns the user's practice sessions in reverse chronological order.
+Returns the user's practice sessions in reverse chronological order (most recent first). Defaults to the 20 most recent records.
 
-Planned response example:
+Current status: implemented.
+
+#### Response Example
 
 ```json
 [
   {
     "session_id": "session_abc123",
     "scenario_id": "interview",
-    "scenario_title": "Interview",
+    "scenario_title": "闈㈣瘯娌熼€?,
     "started_at": "2026-06-07T03:50:00.000000+00:00",
     "overall_score": 85,
     "summary_preview": "Good session.",
@@ -380,16 +441,18 @@ Planned response example:
 
 ### GET /api/history/sessions/{session_id}
 
-Returns the full detail of a saved practice session: scenario info, messages, feedback records, summary JSON, scores, and provider. Returns HTTP 404 when the session does not exist.
+Returns the full detail of a saved practice session: scenario info, all messages, all feedback records, and the summary JSON.
 
-Planned response example:
+Current status: implemented.
+
+#### Response Example
 
 ```json
 {
   "session_id": "session_abc123",
   "scenario_id": "interview",
-  "scenario_title": "Interview",
-  "story_intro_zh": "You are in an interview practice context.",
+  "scenario_title": "闈㈣瘯娌熼€?,
+  "story_intro_zh": "浣犳鍦ㄥ弬鍔犱竴鍦洪潰璇曘€?,
   "story_intro_en": "You are joining an interview.",
   "started_at": "2026-06-07T03:50:00.000000+00:00",
   "ended_at": "2026-06-07T03:55:00.000000+00:00",
@@ -415,12 +478,5 @@ Planned response example:
 }
 ```
 
-Planned endpoint summary:
+Returns HTTP 404 when the session does not exist.
 
-- `POST /api/history/sessions`
-- `GET /api/history/sessions?user_id={user_id}`
-- `GET /api/history/sessions/{session_id}`
-
-## Legacy Draft Examples
-
-The older draft examples below used camelCase fields such as `sessionId`, `scenarioId`, `messages`, `quickFeedback`, and `isMock`. They are retained only as legacy draft references. New frontend/backend work should use the current implemented snake_case contract above.

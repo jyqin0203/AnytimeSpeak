@@ -19,7 +19,7 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 - Backend: FastAPI + Python
 - Speech input: browser `SpeechRecognition`
 - Speech playback: browser `SpeechSynthesis`
-- MVP storage: frontend state and backend in-memory sessions; SQLite is planned for lightweight guest profiles and practice history
+- Storage: SQLite for username/password users and practice history; backend in-memory sessions for the active coaching flow
 - AI integration: environment-variable based LLM configuration with mock mode fallback
 
 ## Current Status
@@ -28,9 +28,50 @@ The project includes a mock-first MVP practice loop: scenario selection with sta
 
 The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching. Every chat/feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key.
 
-Guest Profile and SQLite Practice History are planned / in progress outside current `main`. They should be treated as optional demo enhancements until their API, UI, and README status are merged and verified. Full username/password login and cloud-synced history remain future work.
+Username/password auth and practice history are now supported. Users can register or log in from the topbar, then open `History` / `练习历史` to review saved sessions. Passwords are stored with salted PBKDF2 hashes, never as plaintext. The backend stores users, session metadata, messages, per-turn feedback, and post-session summaries in a local SQLite database (`backend/data/anytimespeak.db`). After each practice session the frontend automatically saves the record; users can log out, log back in, and still see their history. If saving fails, the completed session remains in the current frontend state as a pending save and the summary page shows a fallback note.
 
 ## Local Development
+
+### One-command development startup
+
+Install dependencies first:
+
+```bash
+cd frontend
+npm install
+cd ../backend
+pip install -r requirements.txt
+```
+
+Then start both services from the project root with one command:
+
+```bash
+npm run dev
+```
+
+Stop both services from the project root with:
+
+```bash
+npm run stop
+```
+
+On Windows, this runs `scripts/dev.bat` and opens separate terminal windows for the backend and frontend.
+The stop command runs `scripts/stop-dev.bat` and stops processes listening on ports `5173` and `8000`.
+On macOS/Linux, you can alternatively run:
+
+```bash
+sh scripts/dev.sh
+sh scripts/stop-dev.sh
+```
+
+Development URLs:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://127.0.0.1:8000`
+
+The frontend runs Vite in development mode, so React/page changes are applied by HMR or browser refresh.
+The backend runs `uvicorn app.main:app --reload`, so Python code changes under `backend/` reload the service automatically.
+Changes to `.env` files, installed dependencies, Python package versions, Node package versions, or port configuration still require manually stopping and restarting the development servers.
 
 ### Frontend
 

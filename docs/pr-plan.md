@@ -1,4 +1,4 @@
-# PR Plan
+﻿# PR Plan
 
 This project should be developed through small, focused PRs. Each PR should keep `main` runnable and include a clear description, implementation approach, test method, and dependency/API disclosure.
 
@@ -210,18 +210,18 @@ Also verify:
 - Define score calculation rules.
 - Show score history or simple progress indicators.
 
-## PR 13: Guest Profile and Practice History
+## PR 13: User Auth and Practice History
 
-Current status: planned / in progress outside current `main` unless the related Draft PR has been merged. Agents should not duplicate this feature if a Draft PR already exists; review the active branch/PR first.
+Current status: merged into `main`.
 
 - Add SQLite database with users, practice_sessions, messages, and feedbacks tables.
-- Add guest profile creation (nickname only, no password or OAuth).
-- Add `POST /api/users/guest` and `GET /api/users/{user_id}`.
+- Add minimal username/password registration and login with salted password hashes; no OAuth.
+- Add `POST /api/users/register`, `POST /api/users/login`, and `GET /api/users/{user_id}`.
 - Add `POST /api/history/sessions`, `GET /api/history/sessions`, and `GET /api/history/sessions/{session_id}`.
-- Auto-save practice history after each session ends; defer and retry if the backend is unavailable.
+- Auto-save practice history after each session ends; keep the completed session as a pending save if the backend is unavailable.
 - Frontend history list and session detail views.
-- Profile chip and history button in the topbar.
-- Score panel shows a neutral empty state before the first turn instead of a hardcoded placeholder.
+- Login/profile chip and History button in the topbar.
+- Score panel shows an empty placeholder before the first turn instead of a hardcoded score.
 
 ## PR 14: README, Screenshots, and Demo Video Script
 
@@ -235,6 +235,5 @@ Current status: still needed for final submission materials. Do not add a demo v
 ## Recommended Follow-Up PRs
 
 - `fix: improve practice layout and demo usability`
-- `feat: add username password login and stable practice history`
 - `feat: add streaming ASR provider`
 - `docs: finalize submission materials`

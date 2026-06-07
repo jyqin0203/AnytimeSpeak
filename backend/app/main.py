@@ -1,6 +1,26 @@
-from fastapi import FastAPI
+from contextlib import asynccontextmanager
+import sqlite3
+from typing import AsyncGenerator
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.database import init_db
+from app.history_schemas import (
+    SaveSessionRequest,
+    SessionDetail,
+    SessionListItem,
+    UserCredentialsRequest,
+    UserResponse,
+)
+from app.history_service import (
+    get_user,
+    get_session_detail,
+    login_user,
+    list_user_sessions,
+    register_user,
+    save_practice_session,
+)
 from app.llm_provider import (
     create_chat_reply_with_fallback,
     create_feedback_with_fallback,
@@ -20,7 +40,13 @@ from app.schemas import (
     SummaryResponse,
 )
 
-app = FastAPI(title="AnytimeSpeak API")
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    init_db()
+    yield
+
+
+app = FastAPI(title="AnytimeSpeak API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -72,3 +98,52 @@ def post_feedback(request: FeedbackRequest):
 @app.post("/api/summary", response_model=SummaryResponse)
 def post_summary(request: SummaryRequest):
     return create_summary_with_fallback(request)
+
+
+# ── Guest user endpoints ──────────────────────────────────────────────────────
+
+@app.post("/api/users/register", response_model=UserResponse)
+def post_register_user(request: UserCredentialsRequest):
+    try:
+        return register_user(request)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(status_code=409, detail="Username already exists") from exc
+
+
+@app.post("/api/users/login", response_model=UserResponse)
+def post_login_user(request: UserCredentialsRequest):
+    user = login_user(request)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    return user
+
+
+@app.get("/api/users/{user_id}", response_model=UserResponse)
+def get_user_by_id(user_id: str):
+    user = get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+# ── History endpoints ─────────────────────────────────────────────────────────
+
+@app.post("/api/history/sessions", response_model=SessionListItem)
+def post_history_session(request: SaveSessionRequest):
+    user = get_user(request.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return save_practice_session(request)
+
+
+@app.get("/api/history/sessions", response_model=list[SessionListItem])
+def get_history_sessions(user_id: str):
+    return list_user_sessions(user_id)
+
+
+@app.get("/api/history/sessions/{session_id}", response_model=SessionDetail)
+def get_history_session(session_id: str):
+    detail = get_session_detail(session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return detail
