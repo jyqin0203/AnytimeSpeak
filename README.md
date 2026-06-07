@@ -122,11 +122,22 @@ Related preparation docs:
 - API contract: `docs/api-contract.md`
 - Submission guide: `docs/submission-guide.md`
 
+## Future Extension: End-to-End Voice AI Model
+
+The current version supports Doubao (ByteDance) Streaming ASR for real-time Chinese-English mixed speech recognition as an optional backend provider. The architecture is designed so that a full end-to-end voice AI pipeline can be added without restructuring existing code:
+
+- **Voice input (ASR)**: Real-time speech recognition via Doubao BigModel Streaming ASR WebSocket API, capturing PCM audio in the browser and streaming transcripts back through the backend relay (`/ws/asr`). Currently implemented as an optional provider (set `ASR_PROVIDER_MODE=doubao`).
+- **Voice output (TTS)**: Cloud TTS services (e.g., Doubao TTS, Azure Cognitive Services TTS) can replace or supplement the current browser `SpeechSynthesis` by implementing the existing `SpeechOutputProvider` interface.
+- **Pronunciation assessment**: A `PronunciationAssessmentProvider` interface is already defined in `frontend/src/speech/types.ts`. Cloud pronunciation scoring (e.g., Azure Pronunciation Assessment) can be plugged in without changing the practice flow.
+- **Full end-to-end pipeline**: Combining Doubao ASR → LLM coaching → Doubao TTS would create a fully cloud-powered voice conversation loop. This is a planned direction but is **not implemented in the current version** to keep the MVP stable and reproducible without mandatory cloud credentials.
+
+See `frontend/src/speech/types.ts` for the provider interfaces and `backend/app/asr_provider.py` for the Doubao ASR integration point.
+
 ## Originality and Third-Party Dependencies
 
-- Original project code: project scaffold, backend health endpoint, frontend MVP flow, backend coaching endpoints, and documentation are maintained in this repository.
-- Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, and HTTPX.
-- AI APIs or AI-generated code usage: optional LLM provider calls are configured through environment variables; mock mode remains the default for reproducible demos. LLM environment variable placeholders are listed in `.env.example`.
+- Original project code: project scaffold, backend health endpoint, frontend MVP flow, backend coaching endpoints, Doubao ASR provider integration, and documentation are maintained in this repository.
+- Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, HTTPX, and websockets.
+- AI APIs or AI-generated code usage: optional LLM provider calls and optional Doubao Streaming ASR are configured through environment variables; mock mode and browser fallback remain the defaults for reproducible demos. Environment variable placeholders are listed in `.env.example`.
 - API keys, private credentials, and unauthorized assets must not be committed.
 
 ## Development Plan
@@ -136,7 +147,7 @@ Near-term PRs:
 1. ~~Guest Profile and SQLite Practice History~~ — merged.
 2. ~~Practice layout and UI/UX improvements~~ — merged.
 3. ~~Username/password login and practice history~~ — merged.
-4. Streaming ASR provider.
+4. ~~Doubao Streaming ASR provider~~ — merged.
 5. Final submission materials.
 
 See `docs/pr-plan.md` for the detailed PR roadmap.

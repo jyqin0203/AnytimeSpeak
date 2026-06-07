@@ -1,4 +1,5 @@
 export { browserSpeechInputProvider, browserSpeechOutputProvider } from "./browserSpeechProvider";
+export { doubaoSpeechProvider } from "./doubaoSpeechProvider";
 export { useSpeechInput } from "./useSpeechInput";
 export { useSpeechOutput } from "./useSpeechOutput";
 export { useVoiceRecorder } from "./useVoiceRecorder";

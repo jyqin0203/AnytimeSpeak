@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 import sqlite3
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
@@ -21,6 +21,7 @@ from app.history_service import (
     register_user,
     save_practice_session,
 )
+from app.asr_provider import get_asr_mode, proxy_doubao_asr
 from app.llm_provider import (
     create_chat_reply_with_fallback,
     create_feedback_with_fallback,
@@ -73,6 +74,24 @@ app.add_middleware(
 @app.get("/api/health")
 def health_check():
     return {"status": "ok"}
+
+
+# ── ASR endpoints ─────────────────────────────────────────────────────────────
+
+@app.get("/api/asr/mode")
+def get_asr_mode_endpoint():
+    """Return the active ASR provider mode without exposing credentials."""
+    return {"asr_mode": get_asr_mode()}
+
+
+@app.websocket("/ws/asr")
+async def websocket_asr(ws: WebSocket):
+    """WebSocket endpoint: relays frontend audio to Doubao ASR and streams transcripts back."""
+    await ws.accept()
+    try:
+        await proxy_doubao_asr(ws)
+    except WebSocketDisconnect:
+        pass
 
 
 @app.get("/api/scenarios", response_model=list[Scenario])
