@@ -216,6 +216,9 @@ function App() {
     try {
       await saveSessionHistory({ ...payload, userId: user.userId });
       pendingHistoryRef.current = null;
+      const items = await fetchSessionHistory(user.userId);
+      setHistoryList(items);
+      setHistoryStatus("idle");
     } catch {
       setHistorySaveNote("本次总结已生成，但历史记录保存失败。请保持登录，稍后可重新结束练习或重新登录后重试。");
     }
@@ -281,6 +284,10 @@ function App() {
     setHistoryStatus("loading");
     setView("history");
     try {
+      const pending = pendingHistoryRef.current;
+      if (pending) {
+        await trySaveHistory(authUser, pending);
+      }
       const items = await fetchSessionHistory(authUser.userId);
       setHistoryList(items);
       setHistoryStatus("idle");

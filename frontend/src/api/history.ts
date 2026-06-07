@@ -159,7 +159,7 @@ export type SaveHistoryPayload = {
 
 export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<HistorySessionItem> {
   const scoreMap = payload.summary.scores as Record<string, number>;
-  const overallScore = scoreMap["综合"] ?? scoreMap["缁煎悎"] ?? null;
+  const overallScore = resolveOverallScore(scoreMap);
   const body = {
     user_id: payload.userId,
     session_id: payload.sessionId,
@@ -204,6 +204,17 @@ export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<H
   });
 
   return fromApiSessionItem(data);
+}
+
+function resolveOverallScore(scores: Record<string, number>): number | null {
+  const explicit = scores.overall ?? scores["综合"] ?? scores["缁煎悎"];
+  if (typeof explicit === "number" && Number.isFinite(explicit)) {
+    return explicit;
+  }
+
+  const values = Object.values(scores).filter((value) => typeof value === "number" && Number.isFinite(value));
+  if (values.length === 0) return null;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
 export async function fetchSessionHistory(userId: string): Promise<HistorySessionItem[]> {
