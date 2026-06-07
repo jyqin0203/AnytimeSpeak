@@ -2,6 +2,16 @@
 
 This project should be developed through small, focused PRs. Each PR should keep `main` runnable and include a clear description, implementation approach, test method, and dependency/API disclosure.
 
+## Current Status Source Of Truth
+
+The early PR numbering below is a planning history, not a guaranteed statement of what is currently missing. When PR numbering conflicts with the current implementation state, use these sources in this order:
+
+1. Current code on `main`.
+2. README Current Status.
+3. `docs/api-contract.md` current implemented sections.
+
+Do not re-implement a feature just because an early numbered PR title mentions it. First check whether it is already merged, in a Draft PR, or superseded by a later implementation.
+
 ## Agent PR Submission Guide
 
 This section is the canonical PR workflow for Codex/Coding Agents working on this repository. Follow it before opening any future PR.
@@ -184,9 +194,31 @@ Also verify:
 - Define score calculation rules.
 - Show score history or simple progress indicators.
 
-## PR 13: README, Screenshots, and Demo Video Script
+## PR 13: Guest Profile and Practice History
+
+Current status: planned / in progress outside current `main` unless the related Draft PR has been merged. Agents should not duplicate this feature if a Draft PR already exists; review the active branch/PR first.
+
+- Add SQLite database with users, practice_sessions, messages, and feedbacks tables.
+- Add guest profile creation (nickname only, no password or OAuth).
+- Add `POST /api/users/guest` and `GET /api/users/{user_id}`.
+- Add `POST /api/history/sessions`, `GET /api/history/sessions`, and `GET /api/history/sessions/{session_id}`.
+- Auto-save practice history after each session ends; defer and retry if the backend is unavailable.
+- Frontend history list and session detail views.
+- Profile chip and history button in the topbar.
+- Score panel shows a neutral empty state before the first turn instead of a hardcoded placeholder.
+
+## PR 14: README, Screenshots, and Demo Video Script
+
+Current status: still needed for final submission materials. Do not add a demo video link until a real accessible link exists.
 
 - Update README with final setup and demo steps.
 - Add screenshot references.
 - Add demo video script and recording checklist.
 - Document third-party dependencies, APIs, and AI-generated code usage.
+
+## Recommended Follow-Up PRs
+
+- `fix: improve practice layout and demo usability`
+- `feat: add username password login and stable practice history`
+- `feat: add streaming ASR provider`
+- `docs: finalize submission materials`

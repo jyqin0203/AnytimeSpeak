@@ -73,7 +73,7 @@ Instructions:
 
 ## Shared Feedback Format
 
-Future backend responses can use a structure similar to this.
+Legacy draft responses used a structure similar to this. Current backend responses use the snake_case contract documented in `docs/api-contract.md`.
 
 ```text
 rolePlayReply: The AI response in character.
