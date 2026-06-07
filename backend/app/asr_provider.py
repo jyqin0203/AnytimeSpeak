@@ -5,9 +5,11 @@ This module proxies audio from the frontend WebSocket to the Doubao BigModel
 real-time ASR API and relays transcription events back to the client.
 
 Environment variables:
-  ASR_PROVIDER_MODE  "doubao" to enable; anything else (or absent) means disabled.
-  DOUBAO_APP_ID      Volcano Engine app ID from the console.
-  DOUBAO_ASR_TOKEN   Bearer token (access token) for the ASR service.
+  ASR_PROVIDER_MODE    "doubao" to enable; anything else means disabled.
+  DOUBAO_APP_ID        Volcano Engine app ID (10-digit number from console).
+  DOUBAO_ASR_TOKEN     App-level bearer token (32 chars from console).
+  DOUBAO_RESOURCE_ID   BigModel resource/endpoint ID from the console.
+                       Get it from: 语音技术 → 大模型流式识别 → 接入管理.
 """
 
 import asyncio
@@ -21,6 +23,9 @@ from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+DOUBAO_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+DOUBAO_LANGUAGE = "zh-Hans-en"  # Chinese-English mixed recognition
+
 
 def _load_dotenv_files() -> None:
     if os.getenv("ANYTIMESPEAK_SKIP_DOTENV", "").strip() == "1":
@@ -31,25 +36,28 @@ def _load_dotenv_files() -> None:
         if path.exists():
             load_dotenv(path, override=False)
 
-# Doubao BigModel Streaming ASR WebSocket endpoint (Volcano Engine)
-DOUBAO_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
 
-# Supported language code for Chinese-English mixed recognition
-DOUBAO_LANGUAGE = "zh-Hans-en"
+def _get_credentials() -> tuple[str, str, str]:
+    """Return (app_id, token, resource_id); empty strings when missing."""
+    return (
+        os.getenv("DOUBAO_APP_ID", "").strip(),
+        os.getenv("DOUBAO_ASR_TOKEN", "").strip(),
+        os.getenv("DOUBAO_RESOURCE_ID", "").strip(),
+    )
 
 
 def get_asr_mode() -> str:
-    """Return 'doubao' when all required env vars are present, else 'browser'."""
+    """Return 'doubao' when all three required env vars are present, else 'browser'."""
     _load_dotenv_files()
     mode = os.getenv("ASR_PROVIDER_MODE", "browser").strip().lower()
     if mode == "doubao":
-        app_id = os.getenv("DOUBAO_APP_ID", "").strip()
-        token = os.getenv("DOUBAO_ASR_TOKEN", "").strip()
-        if app_id and token:
+        app_id, token, resource_id = _get_credentials()
+        if app_id and token and resource_id:
             return "doubao"
+        missing = [k for k, v in [("DOUBAO_APP_ID", app_id), ("DOUBAO_ASR_TOKEN", token), ("DOUBAO_RESOURCE_ID", resource_id)] if not v]
         logger.warning(
-            "ASR_PROVIDER_MODE=doubao but DOUBAO_APP_ID or DOUBAO_ASR_TOKEN is missing; "
-            "falling back to browser mode."
+            "ASR_PROVIDER_MODE=doubao but missing env vars: %s — falling back to browser.",
+            ", ".join(missing),
         )
     return "browser"
 
@@ -58,12 +66,12 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
     """
     Proxy audio from frontend WebSocket to Doubao ASR and relay results back.
 
-    Message protocol (frontend → backend):
+    Frontend → backend protocol:
       - JSON text: {"type": "config", "lang": "zh-CN"}   (first frame, optional)
       - Binary:    raw PCM 16-bit 16kHz mono audio chunks
       - JSON text: {"type": "end"}                        (signal end of audio)
 
-    Message protocol (backend → frontend):
+    Backend → frontend protocol:
       - JSON text: {"type": "ready"}
       - JSON text: {"type": "partial", "transcript": "..."}
       - JSON text: {"type": "final",   "transcript": "..."}
@@ -77,16 +85,23 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
         )
         return
 
-    app_id = os.getenv("DOUBAO_APP_ID", "").strip()
-    token = os.getenv("DOUBAO_ASR_TOKEN", "").strip()
+    _load_dotenv_files()
+    app_id, token, resource_id = _get_credentials()
 
-    if not app_id or not token:
+    if not app_id or not token or not resource_id:
+        missing = [k for k, v in [("DOUBAO_APP_ID", app_id), ("DOUBAO_ASR_TOKEN", token), ("DOUBAO_RESOURCE_ID", resource_id)] if not v]
         await frontend_ws.send_text(
-            json.dumps({"type": "error", "code": "not-configured", "message": "Doubao ASR credentials not configured"})
+            json.dumps({
+                "type": "error",
+                "code": "not-configured",
+                "message": f"Doubao ASR missing config: {', '.join(missing)}",
+            })
         )
         return
 
     uid = f"anytimespeak_{uuid.uuid4().hex[:8]}"
+    # resource_id goes as URL query param — required by the v3/bigmodel endpoint
+    url = f"{DOUBAO_ASR_URL}?resource_id={resource_id}"
     headers = {
         "Authorization": f"Bearer {token}",
         "X-App-Id": app_id,
@@ -96,9 +111,10 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
         "header": {
             "app_id": app_id,
             "uid": uid,
-            "namespace": "BidirectionalTTS",
+            "namespace": "SpeechTranscription",
+            "name": "StartTranscription",
         },
-        "audio_info": {
+        "audio": {
             "format": "pcm",
             "sample_rate": 16000,
             "bits": 16,
@@ -108,7 +124,8 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
     }
 
     try:
-        async with websockets.connect(DOUBAO_ASR_URL, extra_headers=headers) as doubao_ws:
+        # websockets >= 14.x uses additional_headers (not extra_headers)
+        async with websockets.connect(url, additional_headers=headers, open_timeout=8) as doubao_ws:
             await doubao_ws.send(json.dumps(init_payload))
             await frontend_ws.send_text(json.dumps({"type": "ready"}))
 
@@ -129,20 +146,21 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
                             raw_bytes = data.get("bytes")
                             raw_text = data.get("text")
                             if raw_bytes:
-                                # PCM audio chunk
                                 await doubao_ws.send(raw_bytes)
                             elif raw_text:
                                 try:
                                     ctrl = json.loads(raw_text)
                                     if ctrl.get("type") == "end":
-                                        # Send empty frame to signal end of audio
                                         await doubao_ws.send(b"")
                                         break
                                 except json.JSONDecodeError:
                                     pass
                 finally:
                     stop_event.set()
-                    await doubao_ws.close()
+                    try:
+                        await doubao_ws.close()
+                    except Exception:  # noqa: BLE001
+                        pass
 
             async def relay_doubao_to_frontend() -> None:
                 try:
@@ -178,10 +196,14 @@ async def proxy_doubao_asr(frontend_ws) -> None:  # type: ignore[type-arg]
             )
 
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Doubao ASR proxy error: %s", exc)
+        logger.warning("Doubao ASR proxy error: %s: %s", type(exc).__name__, exc)
         try:
             await frontend_ws.send_text(
-                json.dumps({"type": "error", "code": "network", "message": "语音识别服务暂时不可用，请使用文本输入。"})
+                json.dumps({
+                    "type": "error",
+                    "code": "network",
+                    "message": "豆包语音识别服务暂时不可用，已切换到浏览器语音识别。",
+                })
             )
         except Exception:  # noqa: BLE001
             pass

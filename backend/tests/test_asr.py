@@ -10,12 +10,19 @@ from app.asr_provider import get_asr_mode
 
 client = TestClient(app)
 
+_ALL_THREE = {
+    "ASR_PROVIDER_MODE": "doubao",
+    "DOUBAO_APP_ID": "test_app_id",
+    "DOUBAO_ASR_TOKEN": "test_token_32c",
+    "DOUBAO_RESOURCE_ID": "test_resource_id",
+}
+
 
 # ── /api/asr/mode tests ───────────────────────────────────────────────────────
 
 def test_asr_mode_returns_browser_when_no_env():
     """Default mode is 'browser' when env vars are absent."""
-    env_patch = {"ASR_PROVIDER_MODE": "", "DOUBAO_APP_ID": "", "DOUBAO_ASR_TOKEN": ""}
+    env_patch = {"ASR_PROVIDER_MODE": "", "DOUBAO_APP_ID": "", "DOUBAO_ASR_TOKEN": "", "DOUBAO_RESOURCE_ID": ""}
     with patch.dict(os.environ, env_patch, clear=False):
         response = client.get("/api/asr/mode")
     assert response.status_code == 200
@@ -31,24 +38,34 @@ def test_asr_mode_returns_browser_when_mode_is_mock():
 
 
 def test_asr_mode_returns_doubao_when_fully_configured():
-    """Mode is 'doubao' only when both DOUBAO_APP_ID and DOUBAO_ASR_TOKEN are set."""
-    env_patch = {
-        "ASR_PROVIDER_MODE": "doubao",
-        "DOUBAO_APP_ID": "test_app_id",
-        "DOUBAO_ASR_TOKEN": "test_token",
-    }
-    with patch.dict(os.environ, env_patch, clear=False):
+    """Mode is 'doubao' only when all three vars (APP_ID, TOKEN, RESOURCE_ID) are set."""
+    with patch.dict(os.environ, _ALL_THREE, clear=False):
         response = client.get("/api/asr/mode")
     assert response.status_code == 200
     assert response.json() == {"asr_mode": "doubao"}
 
 
+def test_asr_mode_falls_back_when_resource_id_missing():
+    """Mode falls back to 'browser' when DOUBAO_RESOURCE_ID is absent."""
+    env_patch = {
+        "ASR_PROVIDER_MODE": "doubao",
+        "DOUBAO_APP_ID": "app1",
+        "DOUBAO_ASR_TOKEN": "tok1",
+        "DOUBAO_RESOURCE_ID": "",
+    }
+    with patch.dict(os.environ, env_patch, clear=False):
+        response = client.get("/api/asr/mode")
+    assert response.status_code == 200
+    assert response.json() == {"asr_mode": "browser"}
+
+
 def test_asr_mode_falls_back_to_browser_when_credentials_missing():
-    """Mode falls back to 'browser' when ASR_PROVIDER_MODE=doubao but credentials absent."""
+    """Mode falls back to 'browser' when APP_ID and TOKEN are absent."""
     env_patch = {
         "ASR_PROVIDER_MODE": "doubao",
         "DOUBAO_APP_ID": "",
         "DOUBAO_ASR_TOKEN": "",
+        "DOUBAO_RESOURCE_ID": "",
     }
     with patch.dict(os.environ, env_patch, clear=False):
         response = client.get("/api/asr/mode")
@@ -59,27 +76,33 @@ def test_asr_mode_falls_back_to_browser_when_credentials_missing():
 # ── get_asr_mode() unit tests ─────────────────────────────────────────────────
 
 def test_get_asr_mode_returns_browser_by_default():
-    with patch.dict(os.environ, {"ASR_PROVIDER_MODE": ""}, clear=False):
+    env = {"ASR_PROVIDER_MODE": "", "DOUBAO_APP_ID": "", "DOUBAO_ASR_TOKEN": "", "DOUBAO_RESOURCE_ID": ""}
+    with patch.dict(os.environ, env, clear=False):
         assert get_asr_mode() == "browser"
 
 
-def test_get_asr_mode_returns_doubao_when_configured():
-    env = {"ASR_PROVIDER_MODE": "doubao", "DOUBAO_APP_ID": "app1", "DOUBAO_ASR_TOKEN": "tok1"}
-    with patch.dict(os.environ, env, clear=False):
+def test_get_asr_mode_returns_doubao_when_fully_configured():
+    with patch.dict(os.environ, _ALL_THREE, clear=False):
         assert get_asr_mode() == "doubao"
 
 
 def test_get_asr_mode_case_insensitive():
-    env = {"ASR_PROVIDER_MODE": "DOUBAO", "DOUBAO_APP_ID": "app1", "DOUBAO_ASR_TOKEN": "tok1"}
+    env = {**_ALL_THREE, "ASR_PROVIDER_MODE": "DOUBAO"}
     with patch.dict(os.environ, env, clear=False):
         assert get_asr_mode() == "doubao"
 
 
-# ── /ws/asr endpoint smoke test ───────────────────────────────────────────────
+def test_get_asr_mode_browser_when_resource_id_missing():
+    env = {"ASR_PROVIDER_MODE": "doubao", "DOUBAO_APP_ID": "app1", "DOUBAO_ASR_TOKEN": "tok1", "DOUBAO_RESOURCE_ID": ""}
+    with patch.dict(os.environ, env, clear=False):
+        assert get_asr_mode() == "browser"
+
+
+# ── /ws/asr endpoint smoke tests ─────────────────────────────────────────────
 
 def test_ws_asr_rejects_when_not_configured():
-    """WebSocket /ws/asr should send an error and close when Doubao is not configured."""
-    env_patch = {"ASR_PROVIDER_MODE": "browser", "DOUBAO_APP_ID": "", "DOUBAO_ASR_TOKEN": ""}
+    """WebSocket /ws/asr sends error when Doubao is not configured."""
+    env_patch = {"ASR_PROVIDER_MODE": "browser", "DOUBAO_APP_ID": "", "DOUBAO_ASR_TOKEN": "", "DOUBAO_RESOURCE_ID": ""}
     with patch.dict(os.environ, env_patch, clear=False):
         with client.websocket_connect("/ws/asr") as ws:
             data = ws.receive_json()
@@ -87,9 +110,14 @@ def test_ws_asr_rejects_when_not_configured():
     assert "code" in data
 
 
-def test_ws_asr_rejects_when_doubao_mode_but_no_credentials():
-    """WebSocket sends error when mode=doubao but credentials are missing."""
-    env_patch = {"ASR_PROVIDER_MODE": "doubao", "DOUBAO_APP_ID": "", "DOUBAO_ASR_TOKEN": ""}
+def test_ws_asr_rejects_when_resource_id_missing():
+    """WebSocket sends error when resource_id is absent."""
+    env_patch = {
+        "ASR_PROVIDER_MODE": "doubao",
+        "DOUBAO_APP_ID": "app1",
+        "DOUBAO_ASR_TOKEN": "tok1",
+        "DOUBAO_RESOURCE_ID": "",
+    }
     with patch.dict(os.environ, env_patch, clear=False):
         with client.websocket_connect("/ws/asr") as ws:
             data = ws.receive_json()

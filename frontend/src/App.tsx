@@ -492,6 +492,7 @@ function App() {
           onSendText={submitVoiceText}
           onEnd={endPractice}
           onReset={() => setView("scenarios")}
+          onAsrFallback={() => setAsrProvider(browserSpeechInputProvider)}
         />
       )}
       {view === "summary" && (
@@ -1020,6 +1021,7 @@ function Practice({
   onSendText,
   onEnd,
   onReset,
+  onAsrFallback,
 }: {
   scenario: Scenario;
   messages: Message[];
@@ -1037,6 +1039,7 @@ function Practice({
   onSendText: (value: string, recording?: VoiceRecording | null) => void;
   onEnd: () => void;
   onReset: () => void;
+  onAsrFallback: () => void;
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestFeedback = feedback[feedback.length - 1];
@@ -1062,6 +1065,13 @@ function Practice({
     },
   });
   const isRecording = speechInput.isListening || speechInput.isRestarting;
+
+  // When Doubao ASR fails, automatically fall back to browser SpeechRecognition.
+  useEffect(() => {
+    if (asrProvider.id === "doubao-asr" && speechInput.error) {
+      onAsrFallback();
+    }
+  }, [asrProvider.id, speechInput.error, onAsrFallback]);
 
   useEffect(() => {
     if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
@@ -1220,10 +1230,9 @@ function Practice({
             {sendStatus === "loading" ? "..." : "发送"}
           </button>
         </form>
-        {speechInput.error && (
+        {speechInput.error && asrProvider.id !== "doubao-asr" && (
           <p className="asr-error" role="alert">
-            {asrProvider.id === "doubao-asr" ? "豆包语音：" : "语音识别："}
-            {speechInput.error.message}
+            语音识别：{speechInput.error.message}
           </p>
         )}
       </div>
