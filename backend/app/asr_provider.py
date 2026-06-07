@@ -15,8 +15,21 @@ import json
 import logging
 import os
 import uuid
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+
+def _load_dotenv_files() -> None:
+    if os.getenv("ANYTIMESPEAK_SKIP_DOTENV", "").strip() == "1":
+        return
+    backend_dir = Path(__file__).resolve().parents[1]
+    project_root = backend_dir.parent
+    for path in [project_root / ".env", backend_dir / ".env"]:
+        if path.exists():
+            load_dotenv(path, override=False)
 
 # Doubao BigModel Streaming ASR WebSocket endpoint (Volcano Engine)
 DOUBAO_ASR_URL = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
@@ -27,6 +40,7 @@ DOUBAO_LANGUAGE = "zh-Hans-en"
 
 def get_asr_mode() -> str:
     """Return 'doubao' when all required env vars are present, else 'browser'."""
+    _load_dotenv_files()
     mode = os.getenv("ASR_PROVIDER_MODE", "browser").strip().lower()
     if mode == "doubao":
         app_id = os.getenv("DOUBAO_APP_ID", "").strip()
