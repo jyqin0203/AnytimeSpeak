@@ -30,12 +30,15 @@ class SaveSessionRequest(BaseModel):
     session_id: str
     scenario_id: str
     scenario_title: str
+    story_intro: str | None = None
     story_intro_zh: str | None = None
     story_intro_en: str | None = None
     messages: list[MessageRecord] = Field(default_factory=list)
     feedbacks: list[FeedbackRecord] = Field(default_factory=list)
+    summary_text: str | None = None
     summary: dict[str, Any] | None = None
     scores: dict[str, Any] | None = None
+    score: int | None = None
     overall_score: int | None = None
     provider: str = "mock"
 
@@ -54,11 +57,14 @@ class SessionDetail(BaseModel):
     session_id: str
     scenario_id: str
     scenario_title: str
+    story_intro: str | None = None
     story_intro_zh: str | None = None
     story_intro_en: str | None = None
     started_at: str
     ended_at: str | None = None
+    score: int | None = None
     overall_score: int | None = None
+    summary: str | None = None
     summary_json: dict[str, Any] | None = None
     provider: str
     messages: list[MessageRecord] = Field(default_factory=list)

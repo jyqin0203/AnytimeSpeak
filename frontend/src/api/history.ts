@@ -2,6 +2,7 @@ import type { Feedback, Message, Scenario, SessionSummary } from "./coaching";
 
 const STORAGE_USER_ID = "anytime_user_id";
 const STORAGE_USERNAME = "anytime_username";
+const STORAGE_PENDING_HISTORY = "anytime_pending_history";
 
 export type AuthUser = {
   userId: string;
@@ -23,11 +24,14 @@ export type HistorySessionDetail = {
   sessionId: string;
   scenarioId: string;
   scenarioTitle: string;
+  storyIntro: string | null;
   storyIntroZh: string | null;
   storyIntroEn: string | null;
   startedAt: string;
   endedAt: string | null;
+  score: number | null;
   overallScore: number | null;
+  summary: string | null;
   summaryJson: Record<string, unknown> | null;
   provider: string;
   messages: { role: string; content: string }[];
@@ -91,6 +95,32 @@ async function historyRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
+export function loadPendingHistory(): Omit<SaveHistoryPayload, "userId"> | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_PENDING_HISTORY);
+    if (!raw) return null;
+    return JSON.parse(raw) as Omit<SaveHistoryPayload, "userId">;
+  } catch {
+    return null;
+  }
+}
+
+export function storePendingHistory(payload: Omit<SaveHistoryPayload, "userId">): void {
+  try {
+    localStorage.setItem(STORAGE_PENDING_HISTORY, JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearPendingHistory(): void {
+  try {
+    localStorage.removeItem(STORAGE_PENDING_HISTORY);
+  } catch {
+    // ignore
+  }
+}
+
 export class HistoryRequestError extends Error {
   readonly status: number;
 
@@ -142,11 +172,14 @@ type ApiSessionDetail = {
   session_id: string;
   scenario_id: string;
   scenario_title: string;
+  story_intro: string | null;
   story_intro_zh: string | null;
   story_intro_en: string | null;
   started_at: string;
   ended_at: string | null;
+  score: number | null;
   overall_score: number | null;
+  summary: string | null;
   summary_json: Record<string, unknown> | null;
   provider: string;
   messages: { role: string; content: string }[];
@@ -175,6 +208,7 @@ export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<H
     session_id: payload.sessionId,
     scenario_id: payload.scenario.id,
     scenario_title: payload.scenario.title,
+    story_intro: payload.scenario.storyIntroZh ?? payload.scenario.storyIntroEn ?? null,
     story_intro_zh: payload.scenario.storyIntroZh ?? null,
     story_intro_en: payload.scenario.storyIntroEn ?? null,
     messages: payload.messages.map((m) => ({
@@ -200,10 +234,12 @@ export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<H
       better_expressions: payload.summary.betterExpressions,
       scores: payload.summary.scores,
     },
+    summary_text: payload.summary.overallPerformance,
     scores: {
       ...payload.summary.scores,
       overall: overallScore,
     },
+    score: overallScore,
     overall_score: overallScore,
     provider: payload.provider,
   };
@@ -238,11 +274,14 @@ export async function fetchSessionDetail(sessionId: string): Promise<HistorySess
     sessionId: data.session_id,
     scenarioId: data.scenario_id,
     scenarioTitle: data.scenario_title,
+    storyIntro: data.story_intro,
     storyIntroZh: data.story_intro_zh,
     storyIntroEn: data.story_intro_en,
     startedAt: data.started_at,
     endedAt: data.ended_at,
+    score: data.score,
     overallScore: data.overall_score,
+    summary: data.summary,
     summaryJson: data.summary_json,
     provider: data.provider,
     messages: data.messages,

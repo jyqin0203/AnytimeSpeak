@@ -19,11 +19,14 @@ CREATE TABLE IF NOT EXISTS practice_sessions (
     session_id TEXT NOT NULL UNIQUE,
     scenario_id TEXT NOT NULL,
     scenario_title TEXT NOT NULL,
+    story_intro TEXT,
     story_intro_zh TEXT,
     story_intro_en TEXT,
     started_at TEXT NOT NULL,
     ended_at TEXT,
+    score INTEGER,
     overall_score INTEGER,
+    summary TEXT,
     summary_json TEXT,
     provider TEXT NOT NULL DEFAULT 'mock',
     FOREIGN KEY (user_id) REFERENCES users(id)
@@ -64,6 +67,7 @@ def init_db() -> None:
     with get_connection() as conn:
         _migrate_legacy_users_table(conn)
         conn.executescript(_CREATE_TABLES_SQL)
+        _ensure_practice_session_columns(conn)
 
 
 def _migrate_legacy_users_table(conn: sqlite3.Connection) -> None:
@@ -105,3 +109,21 @@ def _migrate_legacy_users_table(conn: sqlite3.Connection) -> None:
 
     conn.execute("DROP TABLE users_legacy_guest")
     conn.execute("PRAGMA foreign_keys=ON")
+
+
+def _ensure_practice_session_columns(conn: sqlite3.Connection) -> None:
+    table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'practice_sessions'"
+    ).fetchone()
+    if table is None:
+        return
+
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(practice_sessions)").fetchall()}
+    migrations = {
+        "story_intro": "ALTER TABLE practice_sessions ADD COLUMN story_intro TEXT",
+        "score": "ALTER TABLE practice_sessions ADD COLUMN score INTEGER",
+        "summary": "ALTER TABLE practice_sessions ADD COLUMN summary TEXT",
+    }
+    for column, sql in migrations.items():
+        if column not in columns:
+            conn.execute(sql)

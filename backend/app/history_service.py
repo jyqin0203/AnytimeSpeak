@@ -94,31 +94,47 @@ def get_user(user_id: str) -> UserResponse | None:
 def save_practice_session(request: SaveSessionRequest) -> SessionListItem:
     now = datetime.now(timezone.utc).isoformat()
     summary_json_str = json.dumps(request.summary, ensure_ascii=False) if request.summary else None
+    summary_text = request.summary_text
 
-    overall_score = request.overall_score
+    if summary_text is None and request.summary:
+        for key in ("summary", "overallPerformance", "overall_performance"):
+            val = request.summary.get(key)
+            if val:
+                summary_text = str(val)
+                break
+
+    overall_score = request.overall_score if request.overall_score is not None else request.score
     if overall_score is None and request.scores:
         raw = request.scores.get("overall") or request.scores.get("综合")
         if raw is not None:
             overall_score = int(raw)
 
     summary_preview: str | None = None
-    if request.summary:
+    if summary_text:
+        summary_preview = summary_text[:120]
+    elif request.summary:
         for key in ("summary", "overallPerformance", "overall_performance"):
             val = request.summary.get(key)
             if val:
                 summary_preview = str(val)[:120]
                 break
+    story_intro = request.story_intro or request.story_intro_zh or request.story_intro_en
 
     with get_connection() as conn:
         conn.execute(
             """INSERT INTO practice_sessions
                (id, user_id, session_id, scenario_id, scenario_title,
-                story_intro_zh, story_intro_en, started_at, ended_at,
-                overall_score, summary_json, provider)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                story_intro, story_intro_zh, story_intro_en, started_at, ended_at,
+                score, overall_score, summary, summary_json, provider)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(session_id) DO UPDATE SET
+                 story_intro = excluded.story_intro,
+                 story_intro_zh = excluded.story_intro_zh,
+                 story_intro_en = excluded.story_intro_en,
                  ended_at = excluded.ended_at,
+                 score = excluded.score,
                  overall_score = excluded.overall_score,
+                 summary = excluded.summary,
                  summary_json = excluded.summary_json,
                  provider = excluded.provider""",
             (
@@ -127,11 +143,14 @@ def save_practice_session(request: SaveSessionRequest) -> SessionListItem:
                 request.session_id,
                 request.scenario_id,
                 request.scenario_title,
+                story_intro,
                 request.story_intro_zh,
                 request.story_intro_en,
                 now,
                 now,
                 overall_score,
+                overall_score,
+                summary_text,
                 summary_json_str,
                 request.provider,
             ),
@@ -174,7 +193,7 @@ def list_user_sessions(user_id: str, limit: int = 20) -> list[SessionListItem]:
     with get_connection() as conn:
         rows = conn.execute(
             """SELECT session_id, scenario_id, scenario_title, started_at,
-                      overall_score, summary_json, provider
+                      score, overall_score, summary, summary_json, provider
                FROM practice_sessions
                WHERE user_id = ?
                ORDER BY started_at DESC
@@ -184,13 +203,13 @@ def list_user_sessions(user_id: str, limit: int = 20) -> list[SessionListItem]:
 
     items: list[SessionListItem] = []
     for row in rows:
-        summary_preview: str | None = None
+        summary_preview: str | None = row["summary"][:120] if row["summary"] else None
         if row["summary_json"]:
             try:
                 summary = json.loads(row["summary_json"])
                 for key in ("summary", "overallPerformance", "overall_performance"):
                     val = summary.get(key)
-                    if val:
+                    if val and summary_preview is None:
                         summary_preview = str(val)[:120]
                         break
             except Exception:
@@ -202,7 +221,7 @@ def list_user_sessions(user_id: str, limit: int = 20) -> list[SessionListItem]:
                 scenario_id=row["scenario_id"],
                 scenario_title=row["scenario_title"],
                 started_at=row["started_at"],
-                overall_score=row["overall_score"],
+                overall_score=row["overall_score"] if row["overall_score"] is not None else row["score"],
                 summary_preview=summary_preview,
                 provider=row["provider"],
             )
@@ -214,8 +233,8 @@ def list_user_sessions(user_id: str, limit: int = 20) -> list[SessionListItem]:
 def get_session_detail(session_id: str) -> SessionDetail | None:
     with get_connection() as conn:
         row = conn.execute(
-            """SELECT session_id, scenario_id, scenario_title, story_intro_zh, story_intro_en,
-                      started_at, ended_at, overall_score, summary_json, provider
+            """SELECT session_id, scenario_id, scenario_title, story_intro, story_intro_zh, story_intro_en,
+                      started_at, ended_at, score, overall_score, summary, summary_json, provider
                FROM practice_sessions WHERE session_id = ?""",
             (session_id,),
         ).fetchone()
@@ -262,11 +281,14 @@ def get_session_detail(session_id: str) -> SessionDetail | None:
         session_id=row["session_id"],
         scenario_id=row["scenario_id"],
         scenario_title=row["scenario_title"],
+        story_intro=row["story_intro"],
         story_intro_zh=row["story_intro_zh"],
         story_intro_en=row["story_intro_en"],
         started_at=row["started_at"],
         ended_at=row["ended_at"],
-        overall_score=row["overall_score"],
+        score=row["score"],
+        overall_score=row["overall_score"] if row["overall_score"] is not None else row["score"],
+        summary=row["summary"],
         summary_json=summary_json,
         provider=row["provider"],
         messages=messages,

@@ -14,16 +14,19 @@ import {
   type SessionSummary,
 } from "./api/coaching";
 import {
+  clearPendingHistory,
   clearStoredUser,
   fetchSessionDetail,
   fetchSessionHistory,
   fetchUser,
   formatDateTime,
   HistoryRequestError,
+  loadPendingHistory,
   loadStoredUser,
   loginUser,
   providerLabel,
   registerUser,
+  storePendingHistory,
   saveSessionHistory,
   storeUser,
   type AuthUser,
@@ -80,7 +83,7 @@ function App() {
 
   // Pending save payload: always stored after endPractice so it can be
   // saved retroactively when the user creates a profile.
-  const pendingHistoryRef = useRef<Omit<SaveHistoryPayload, "userId"> | null>(null);
+  const pendingHistoryRef = useRef<Omit<SaveHistoryPayload, "userId"> | null>(loadPendingHistory());
 
   useEffect(() => {
     void loadScenarios();
@@ -230,6 +233,7 @@ function App() {
     try {
       await saveSessionHistory({ ...payload, userId: user.userId });
       pendingHistoryRef.current = null;
+      clearPendingHistory();
       const items = await fetchSessionHistory(user.userId);
       setHistoryList(items);
       setHistoryStatus("idle");
@@ -238,10 +242,12 @@ function App() {
         clearStoredUser();
         setAuthUser(null);
         setShowProfileModal(true);
+        storePendingHistory(payload);
         setHistorySaveNote("本次总结已生成，但当前登录已失效。请重新登录或注册，系统会自动补存这次练习。");
         return;
       }
 
+      storePendingHistory(payload);
       setHistorySaveNote("本次总结已生成，但历史记录保存失败。请确认后端服务正在运行，然后打开练习历史重试自动补存。");
     }
   };
@@ -290,6 +296,7 @@ function App() {
       provider: resolvedProvider,
     };
     pendingHistoryRef.current = pendingPayload;
+    storePendingHistory(pendingPayload);
 
     if (authUser) {
       await trySaveHistory(authUser, pendingPayload);
@@ -306,8 +313,9 @@ function App() {
     setHistoryStatus("loading");
     setView("history");
     try {
-      const pending = pendingHistoryRef.current;
+      const pending = pendingHistoryRef.current ?? loadPendingHistory();
       if (pending) {
+        pendingHistoryRef.current = pending;
         await trySaveHistory(authUser, pending);
       }
       const items = await fetchSessionHistory(authUser.userId);
@@ -352,13 +360,16 @@ function App() {
       return message;
     }
 
-    const pending = pendingHistoryRef.current;
+    const pending = pendingHistoryRef.current ?? loadPendingHistory();
     if (nextUser && pending) {
       try {
         await saveSessionHistory({ ...pending, userId: nextUser.userId });
         pendingHistoryRef.current = null;
+        clearPendingHistory();
         setHistorySaveNote(null);
       } catch {
+        pendingHistoryRef.current = pending;
+        storePendingHistory(pending);
         setHistorySaveNote("登录成功，但本次历史记录保存失败。请稍后再试。");
       }
     }
