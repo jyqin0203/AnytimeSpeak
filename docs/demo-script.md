@@ -1,187 +1,92 @@
 # Demo Script
 
-This script is designed for a 3 to 5 minute MVP demo video. The goal is to show the current AnytimeSpeak loop clearly: choose a scenario, read the story intro, practice a conversation, receive latest-turn feedback, end the session, and review a scored summary.
+This script is for a 3-5 minute final demo video. Use mock mode or test credentials. Do not show `.env`, API keys, tokens, provider consoles, real database contents, or private account data.
 
 ## Recording Setup
 
-- Use backend mock fallback if LLM credentials are unavailable.
-- Keep text input ready as the stable fallback path.
-- Use speech input, AI auto-play, and user recording replay only if the browser supports them reliably during recording.
-- Do not show API keys, tokens, `.env` files, private credentials, or real personal data.
-- Record a single complete session from scenario selection to post-session summary.
-- Treat Guest Profile and Practice History as optional demo steps unless they are stable on the branch being recorded.
+- Use `LLM_PROVIDER_MODE=mock` unless a test LLM key is configured and safe to use.
+- Keep text input ready as the stable fallback.
+- Use speech input, Doubao ASR, AI auto-play, pronunciation assessment, and recording replay only when they are stable in the recording browser.
+- Use a test account such as `demo_user`; do not use a personal username/password.
+- Record one complete loop from scenario selection to summary and history.
 
 ## Suggested Timing
 
 | Section | Time |
 | --- | --- |
-| Opening introduction | 20 to 30 seconds |
-| Optional profile setup | 15 to 30 seconds |
-| Scenario and story intro | 30 to 45 seconds |
-| Speaking practice | 60 to 90 seconds |
-| Latest-turn feedback | 45 to 60 seconds |
-| Post-session summary and scores | 45 to 60 seconds |
-| Optional history review | 20 to 30 seconds |
-| Technical architecture | 30 to 45 seconds |
-| Closing summary | 15 to 30 seconds |
+| Product intro | 20-30 seconds |
+| Login or test account | 15-25 seconds |
+| Scenario and story seed | 30-45 seconds |
+| Practice conversation | 60-90 seconds |
+| Feedback and pronunciation | 45-60 seconds |
+| Summary and scores | 45-60 seconds |
+| History and architecture | 30-45 seconds |
+| Closing | 10-20 seconds |
 
-## 1. Opening Introduction
+## Required Demo Flow
 
-Show the scenario selection or current first screen.
+1. Show the home/scenario page.
+2. Briefly explain AnytimeSpeak: AI English speaking practice for real scenarios.
+3. Register or log in with a test user.
+4. Select a scenario, for example Interview or Meeting.
+5. Show the Chinese and English story intro.
+6. Send one voice or text response.
+7. Let the AI reply.
+8. Send a second response with a small expression issue.
+9. Show latest-turn feedback and provider badge.
+10. If voice was used, show pronunciation assessment and optional recording replay.
+11. End practice.
+12. Show summary, reusable expressions, and score breakdown.
+13. Open history and show the saved session list/detail.
 
-Suggested narration:
+## Sample Narration
 
-> Hi, this is AnytimeSpeak, an AI English speaking practice tool. The current MVP helps learners practice scenario-based English conversations, receive latest-turn feedback, and review a scored summary after each session. The UI is Chinese-first, while the role-play conversation and recommended expressions stay in English.
+Opening:
 
-Key points to mention:
+> This is AnytimeSpeak, an AI English speaking practice tool. Learners choose a real scenario, practice a conversation with an AI role, receive expression feedback, and finish with a scored summary. The UI is Chinese-first, while the practice content stays in English.
 
-- The product is for English speaking practice.
-- The demo can run without private API keys through backend mock fallback.
-- Text input remains available when speech APIs are unavailable.
+Scenario:
 
-## 2. Optional Profile Setup
+> Each scenario includes static story seeds, so the learner starts from a concrete situation instead of a generic chat. This also keeps demo behavior reproducible.
 
-Only include this section if Guest Profile is stable on the branch being recorded.
+Practice:
 
-Recommended action:
+> The conversation is session-based. The backend receives the selected scenario, the latest user message, and previous turns, then returns a role-play reply and feedback. If LLM credentials are missing, backend mock fallback still returns a complete response.
 
-1. Create or select a lightweight practice profile with a nickname.
-2. Mention that this is not username/password login.
-3. Avoid entering real personal information.
+Feedback:
 
-Suggested narration:
+> Feedback focuses on the latest user turn. It recommends a better English expression, explains why, gives a natural alternative, and shows grammar, naturalness, relevance, and clarity scores.
 
-> If profile support is enabled, the learner can create a lightweight guest profile with a nickname. This is only for demo practice history, not a full account system.
+Pronunciation:
 
-If the feature is not stable, skip it without narration.
+> Voice turns can also show pronunciation assessment. Without external credentials, the backend uses a heuristic fallback. With XFYUN credentials, it can call the provider from the backend without exposing secrets to the browser.
 
-## 3. Scenario And Story Intro
+Summary:
 
-Show the scenario selection area and briefly introduce available scenarios.
+> At the end, AnytimeSpeak summarizes strengths, repeated issues, better expressions, scenario completion, next practice focus, and quantitative scores.
 
-Recommended action:
+History:
 
-1. Point out Interview, Restaurant Ordering, and Meeting.
-2. Select one scenario, for example Interview or Meeting.
-3. Show the selected story intro in Chinese and English.
-4. Start the practice session.
+> After login, completed sessions are saved to local SQLite and can be reviewed later.
 
-Suggested narration:
+Architecture:
 
-> Each scenario has static story seeds, so the learner starts with a concrete situation instead of a generic chat. The selected session shows a Chinese story intro, an English intro, and an opening message from the AI role.
+> The frontend is React, Vite, and TypeScript. The backend is FastAPI. LLM, ASR, and pronunciation providers are configured with environment variables, while mock fallback keeps the demo reproducible without keys.
 
-## 4. Speaking Practice
+## Optional Items
 
-Show the practice page with the AI opening message.
+- Doubao ASR live transcript if credentials and network are stable.
+- AI reply auto-play if browser speech synthesis behaves reliably.
+- User recording replay if browser permissions and recording output are stable.
+- XFYUN pronunciation provider if test credentials are configured.
 
-Recommended sample user response:
+Skip optional items silently if they are unstable. Do not claim optional provider mode is active unless the provider badge or local setup confirms it.
 
-> Hello, thank you for meeting with me. I am interested in this role because I have experience working with web applications and I enjoy solving user problems.
+## Final Checks Before Recording
 
-Recommended action:
-
-1. Use speech input if it is stable in the recording browser.
-2. If speech recognition is not stable, type the sample response.
-3. Send the response.
-4. Let the AI reply and show auto-play if it works.
-5. Send one more response with a small grammar or expression issue.
-
-Recommended second user response:
-
-> I worked in a team project before and I was responsible to build the frontend page.
-
-Suggested narration:
-
-> The conversation is session-based, so the backend receives the selected scenario, the latest user message, and the previous turns. The AI reply stays in role and continues the practice conversation.
-
-## 5. Latest-Turn Feedback
-
-Show the feedback panel for the most recent user message.
-
-Suggested narration:
-
-> Feedback focuses on the latest user turn. The previous dialogue is used as context, but the system does not re-score every earlier message. The feedback includes recommended English, the main issue, an explanation, and a score breakdown.
-
-Example feedback to highlight:
-
-- "responsible to build" can be improved to "responsible for building".
-- "frontend page" may sound more natural as "frontend interface" or "frontend features".
-- The score breakdown includes grammar, naturalness, relevance, and clarity.
-- The provider badge shows whether the result came from LLM mode or backend mock fallback.
-
-If user recording replay is stable, briefly replay the user's latest recording. If it is not stable, skip this step.
-
-## 6. Post-Session Summary And Scores
-
-Click the end-practice action and show the summary screen.
-
-Suggested narration:
-
-> After the learner ends the practice, AnytimeSpeak generates a post-session summary. It reviews strengths, repeated issues, reusable expressions, scenario completion, and a next practice focus.
-
-Highlight these summary fields:
-
-- Overall performance summary.
-- Key strengths.
-- Repeated issues.
-- Better expressions to reuse.
-- Scenario goal completion.
-- Suggested next practice focus.
-- Provider badge.
-
-Then show the score area.
-
-Suggested narration:
-
-> The summary also shows quantitative scores from 0 to 100 for grammar, expression, fluency, scenario completion, and overall performance.
-
-## 7. Optional History Review
-
-Only include this section if Practice History is stable on the branch being recorded.
-
-Recommended action:
-
-1. Open the history view.
-2. Show the saved session list.
-3. Open one session detail view.
-4. Point out dialogue, feedback, summary, scores, and provider.
-
-Suggested narration:
-
-> If practice history is enabled, completed sessions can be saved locally and reviewed later. This is a demo enhancement; full username/password login and cloud history are future work.
-
-If save reliability is not verified, skip this section or say it is under active iteration.
-
-## 8. Technical Architecture Summary
-
-Show the repository structure, README, or an architecture slide if available.
-
-Suggested narration:
-
-> The frontend is built with React, Vite, and TypeScript. The backend uses FastAPI and Python. Coaching endpoints support an LLM provider when environment variables are configured, and deterministic backend mock fallback when provider mode or credentials are unavailable.
-
-Key architecture points:
-
-- Current coaching endpoints include `/api/scenarios`, `/api/sessions`, `/api/chat`, `/api/feedback`, and `/api/summary`.
-- Backend mock fallback is different from frontend local fallback. Backend mock means the backend answered successfully with deterministic coaching. Frontend local fallback means the browser could not use the backend response and kept the demo moving locally.
-- Browser `SpeechRecognition` is used where supported for speech input.
-- Browser `SpeechSynthesis` is used for AI reply playback.
-- Browser recording APIs support user recording replay where available.
-- API keys and `.env` contents must not be shown.
-
-## 9. Closing Summary
-
-Return to the summary screen or completed demo loop.
-
-Suggested narration:
-
-> This demo shows the current AnytimeSpeak MVP loop: choose a scenario, read a story intro, practice by voice or text, get latest-turn feedback, end the session, and review a scored summary. Next improvements include more stable history, username/password login, streaming ASR, and UI polish.
-
-Final checklist before stopping the recording:
-
+- No `.env`, API key, token, or provider console is visible.
+- No real personal account or real history record is shown.
 - The selected scenario and story intro are visible.
 - At least one user message and one AI reply are visible.
-- Latest-turn feedback is visible and easy to understand.
-- The session summary and scores are visible.
-- Optional history is shown only if stable.
-- No API key, token, `.env` content, or private credential appears in the recording.
+- Feedback and summary scores are readable.
+- Demo video link remains `TBD` until a real accessible link exists.

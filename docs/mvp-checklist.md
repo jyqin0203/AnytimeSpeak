@@ -1,36 +1,36 @@
 # MVP Checklist
 
-Use this checklist before the final MVP submission and before opening or merging release-related PRs.
-
 Status labels:
 
 - Done: verified by current `main` code or documentation.
-- Pending verification: implemented or expected, but should be checked in the target demo browser/environment.
-- Not in current main: planned or in a Draft PR, not part of current `main`.
+- Pending verification: implemented or expected, but should be checked in the final recording environment.
+- Not implemented: planned extension, not part of current `main`.
 
 ## Functional Completeness
 
 - [x] Done: User can choose scenario-based practice.
-- [x] Done: User can enter the practice page after selecting a scenario.
+- [x] Done: User can enter a practice page after selecting a scenario.
 - [x] Done: Practice session includes a selected story seed and story intro.
 - [x] Done: User can send English input by text.
-- [x] Done: AI can reply according to the selected scenario role.
+- [x] Done: User can send voice input where browser/provider support is available.
+- [x] Done: AI replies according to the selected scenario role.
 - [x] Done: Latest-turn feedback is available.
 - [x] Done: User can end the practice session.
 - [x] Done: User can review a post-session summary.
 - [x] Done: User can see quantitative scores after the session.
-- [ ] Pending verification: Main demo loop works from start to finish in the recording environment without hidden setup.
+- [ ] Pending verification: Main demo loop works start to finish in the final recording environment.
 
 ## Frontend
 
 - [x] Done: React, Vite, and TypeScript app exists.
-- [x] Done: Scenario selection UI includes the core MVP scenarios.
-- [x] Done: Practice UI shows conversation history.
+- [x] Done: Scenario selection UI includes core and extended scenarios.
+- [x] Done: Practice UI shows story, conversation, feedback, input, mic, and end action.
 - [x] Done: Feedback is shown without replacing the role-play conversation.
-- [x] Done: End-session action and summary view exist.
-- [x] Done: Text input remains available as the stable fallback path.
-- [x] Done: Loading, disabled, and error states are clear in the final demo path.
-- [x] Done: Summary and score views are readable on the target demo screen size.
+- [x] Done: Summary and score views are readable.
+- [x] Done: Text input remains available as stable fallback.
+- [x] Done: Login/history UI exists.
+- [x] Done: Pronunciation mini panel exists for voice turns.
+- [ ] Pending verification: Final screenshots are readable on desktop and mobile-sized browser windows.
 
 ## Backend
 
@@ -38,116 +38,82 @@ Status labels:
 - [x] Done: `/api/health` returns `{"status":"ok"}`.
 - [x] Done: `/api/scenarios` returns scenario data with story seed fields.
 - [x] Done: `/api/sessions` starts a session with selected story intro and opening message.
-- [x] Done: `/api/chat` supports the MVP conversation flow.
+- [x] Done: `/api/chat` supports the conversation flow.
 - [x] Done: `/api/feedback` supports latest-turn feedback.
 - [x] Done: `/api/summary` supports scored post-session summary.
-- [x] Done: Coaching endpoints support LLM provider mode and backend mock fallback.
-- [x] Done: Environment variables are used for provider configuration.
-- [x] Done: Backend can run locally without committing private credentials.
-- [ ] Pending verification: Backend errors are clear enough for final demo troubleshooting.
+- [x] Done: `/api/asr/mode` and `/ws/asr` support optional Doubao ASR mode.
+- [x] Done: `/api/pronunciation/assess` supports pronunciation scoring with fallback.
+- [x] Done: `/api/users/*` supports username/password auth.
+- [x] Done: `/api/history/*` supports saved practice sessions.
+- [ ] Pending verification: Backend error messages are clear enough for final demo troubleshooting.
 
 ## Provider And Fallback
 
-- [x] Done: `provider` distinguishes `"llm"` from backend `"mock"` results.
-- [x] Done: `fallback_reason` can explain backend mock fallback without exposing secrets.
+- [x] Done: `provider` distinguishes LLM vs backend mock results.
+- [x] Done: Backend mock fallback works without API keys.
 - [x] Done: Frontend local fallback is separate from backend mock fallback.
-- [x] Done: Pronunciation assessment has a backend API provider interface with safe heuristic fallback.
-- [x] Done: Pronunciation assessment supports optional iFlytek/XFYUN ISE real provider mode.
-- [x] Done: Pronunciation provider falls back to `heuristic_mock` when configuration is missing or the provider fails.
-- [ ] Pending verification: Provider badges/status text are legible in the final demo.
-- [ ] Pending verification: LLM provider path works when valid credentials are configured.
-- [x] Done: Mock fallback keeps the demo reproducible without API keys.
+- [x] Done: Doubao ASR falls back to browser/text mode when not configured.
+- [x] Done: Pronunciation assessment falls back to `heuristic_mock` when not configured or provider fails.
+- [ ] Pending verification: LLM provider path works with valid test credentials.
+- [ ] Pending verification: Doubao ASR works with valid test credentials.
+- [ ] Pending verification: XFYUN pronunciation provider works with valid test credentials.
 
 ## Voice Features
 
-- [x] Done: Speech input uses browser `SpeechRecognition` where supported.
-- [x] Done: Optional Doubao Streaming ASR works through the backend `/ws/asr` relay when configured.
-- [x] Done: Text input still works when speech features fail or are unavailable.
-- [x] Done: Speech playback uses browser `SpeechSynthesis` where supported.
+- [x] Done: Browser `SpeechRecognition` path exists.
+- [x] Done: Text input still works when speech fails.
+- [x] Done: Browser `SpeechSynthesis` playback exists.
 - [x] Done: AI reply auto-play is supported where browser playback works.
 - [x] Done: User recording replay exists through browser recording support.
-- [x] Done: Voice turns can show pronunciation assessment from transcript-based fallback.
-- [x] Done: Voice turns can upload the browser recording for real pronunciation assessment when available.
+- [x] Done: Voice turns can show pronunciation assessment.
 - [x] Done: Text turns do not show fake pronunciation scores.
-- [ ] Pending verification: Speech recognition works reliably in the recording browser.
-- [ ] Pending verification: AI auto-play works reliably in the recording browser.
-- [ ] Pending verification: User recording replay works reliably in the recording browser.
-- [ ] Pending verification: XFYUN pronunciation provider works reliably in the recording browser with valid local credentials.
+- [ ] Pending verification: Speech recognition, playback, and recording replay are stable in the final recording browser.
 
 ## Feedback And Summary
 
-- [x] Done: Per-turn feedback evaluates the latest user message.
+- [x] Done: Feedback evaluates the latest user message.
 - [x] Done: Feedback includes recommended English.
-- [x] Done: Feedback includes issue and explanation fields.
-- [x] Done: Feedback includes score breakdown for grammar, naturalness, relevance, and clarity.
-- [x] Done: Voice-turn feedback can include pronunciation, fluency, accuracy, completeness, and overall pronunciation scores.
-- [x] Done: Post-session summary includes overall performance.
-- [x] Done: Post-session summary includes key strengths.
-- [x] Done: Post-session summary includes repeated issues.
-- [x] Done: Post-session summary includes better expressions to reuse.
-- [x] Done: Post-session summary includes scenario goal completion.
-- [x] Done: Post-session summary includes suggested next practice focus.
-- [x] Done: Scores include grammar, expression, fluency, scenario completion, and overall score.
-- [x] Done: Score scale is 0 to 100.
+- [x] Done: Feedback includes issue and explanation.
+- [x] Done: Feedback includes grammar, naturalness, relevance, and clarity scores.
+- [x] Done: Pronunciation feedback includes pronunciation, fluency, accuracy, completeness, and overall scores.
+- [x] Done: Summary includes strengths, repeated issues, better expressions, scenario completion, next focus, and quantitative scores.
+- [x] Done: Score scale is 0-100.
 
 ## Profile And Practice History
 
 - [x] Done: Username/password registration and login.
-- [x] Done: SQLite Practice History API and UI.
-- [x] Done: Auto-save completed sessions to history.
-- [x] Done: Pronunciation assessment is saved inside per-turn feedback JSON when available.
-- [x] Done: History list and session detail review (`练习历史`).
-- [x] Done: SQLite runtime database files are ignored by `.gitignore`.
-- [ ] Pending verification: Verify profile/history save and retry behavior before the final demo recording.
+- [x] Done: Passwords are salted PBKDF2 hashes.
+- [x] Done: SQLite practice history API and UI.
+- [x] Done: Completed sessions auto-save to history.
+- [x] Done: History list and session detail review.
+- [x] Done: Pronunciation assessment can be saved inside feedback JSON.
+- [x] Done: SQLite runtime database files are ignored.
+- [ ] Pending verification: Save/retry behavior works in final recording environment.
 
-## README
+## Documentation
 
-- [x] Done: README explains the project goal and MVP scope.
-- [x] Done: README includes frontend setup instructions.
-- [x] Done: README includes backend setup instructions.
-- [x] Done: README documents mock mode and how to run without API keys.
-- [x] Done: README lists third-party libraries, frameworks, APIs, and AI-generated code usage.
-- [x] Done: README documents Doubao ASR and XFYUN pronunciation provider environment variables.
-- [x] Done: README includes links to demo documentation.
-- [ ] Pending verification: README status matches the exact branch used for final submission.
-- [ ] Pending verification: README demo video link is added only after a real video link exists.
+- [x] Done: README is Chinese-first.
+- [x] Done: README includes setup, current status, screenshots, API overview, demo steps, dependencies, security, and future work.
+- [x] Done: API contract matches implemented endpoints.
+- [x] Done: Product design reflects current UI and provider/fallback behavior.
+- [x] Done: Demo script describes the final 3-5 minute flow.
+- [x] Done: Submission guide exists.
+- [ ] Pending verification: Demo video link is added only after a real accessible video exists.
 
-## PR And Commit Hygiene
-
-- [ ] Pending verification: Each PR has one focused purpose.
-- [ ] Pending verification: Docs-only PRs avoid changes under `frontend/` and `backend/` unless explicitly required.
-- [ ] Pending verification: PR title is concise and follows project conventions.
-- [ ] Pending verification: PR description includes feature description.
-- [ ] Pending verification: PR description includes implementation approach.
-- [ ] Pending verification: PR description includes test method.
-- [ ] Pending verification: PR description discloses third-party libraries, APIs, and AI-generated code used.
-- [ ] Pending verification: Commit messages are concise conventional commits.
-- [ ] Pending verification: The PR does not include unrelated generated files or local caches.
-- [ ] Pending verification: `main` remains runnable after merge.
-
-## Security
+## Security And Hygiene
 
 - [x] Done: `.env` and `.env.*` are ignored except `.env.example`.
-- [x] Done: SQLite database files (`*.db`, `*.sqlite`, `*.sqlite3`) are ignored.
-- [ ] Pending verification: No API keys are committed.
-- [ ] Pending verification: No tokens are committed.
-- [ ] Pending verification: No `.env` files are committed.
-- [ ] Pending verification: No private credentials are committed.
-- [ ] Pending verification: No unauthorized assets are committed.
-- [ ] Pending verification: Demo screenshots and videos do not expose secrets, local credentials, private account data, or `.env` contents.
+- [x] Done: SQLite database files are ignored.
+- [x] Done: Node build output and Python caches are ignored.
+- [ ] Pending verification: No `.env` is staged or committed.
+- [ ] Pending verification: No real API key, token, private credential, or real database file is staged or committed.
+- [ ] Pending verification: Screenshots and videos do not expose secrets or private data.
+- [ ] Pending verification: Final PR is docs-focused and does not modify core frontend/backend logic.
 
-## Demo Video Submission
+## Not Implemented
 
-- [ ] Pending verification: Demo video is 3 to 5 minutes long or close to the required course duration.
-- [ ] Pending verification: Demo video introduces the product and MVP goal.
-- [ ] Pending verification: Demo video shows scenario selection.
-- [ ] Pending verification: Demo video shows the session story intro.
-- [ ] Pending verification: Demo video shows a practice conversation.
-- [ ] Pending verification: Demo video shows speech input/playback or clearly uses text fallback.
-- [ ] Pending verification: Demo video shows grammar or expression feedback.
-- [ ] Pending verification: Demo video shows ending the practice session.
-- [ ] Pending verification: Demo video shows the post-session summary.
-- [ ] Pending verification: Demo video shows grammar, expression, fluency, scenario completion, and overall scores.
-- [ ] Pending verification: Demo video briefly explains frontend, backend, LLM provider mode, backend mock fallback, and frontend local fallback.
-- [ ] Pending verification: Demo video link is accessible from the final submission location.
-- [ ] Pending verification: Demo video does not show API keys, tokens, `.env` files, database files, or private credentials.
+- [ ] Not implemented: Cloud TTS provider endpoint.
+- [ ] Not implemented: Cloud-synced multi-device history.
+- [ ] Not implemented: Phoneme-level pronunciation visualization.
+- [ ] Not implemented: Teacher dashboard.
+- [ ] Not implemented: Personalized long-term learning path.

@@ -1,43 +1,71 @@
-﻿# API Contract
+# API Contract
 
-This document records the AnytimeSpeak API shape. The backend implements all coaching endpoints (`/api/health`, `/api/scenarios`, `/api/sessions`, `/api/chat`, `/api/feedback`, `/api/summary`) and the guest profile and practice history endpoints (`/api/users/*`, `/api/history/*`). All coaching endpoints support mock mode so local demos remain reproducible without private API keys.
-
-`POST /api/pronunciation/assess` adds pronunciation assessment for voice turns. It is separate from `/api/feedback`: `/api/feedback` handles grammar, expression, naturalness, and scenario fit, while pronunciation assessment handles pronunciation accuracy, fluency, completeness, and spoken delivery suggestions. Text-only turns may skip pronunciation assessment or show a no-assessment state.
+This document records the current AnytimeSpeak backend API on `main`. If older PR notes conflict with this file, use current code plus this contract as the source of truth.
 
 ## General Rules
 
-- Base path: `/api`
-- Request and response bodies use JSON.
-- Mock mode is acceptable for all MVP endpoints until provider integration is added.
-- Current coaching endpoints use snake_case JSON fields.
-- Session-based coaching requests carry `scenario_id`, `latest_user_message`, and `conversation_history` so the backend can inject the scenario story, roles, goal, and previous turns into prompts.
-- `/api/feedback` evaluates only `latest_user_message`; `conversation_history` is context only.
-- Mock responses should be deterministic enough for demo recording.
-- API keys, provider tokens, and `.env` contents must never be returned to the frontend.
-- Error responses should use a predictable shape:
+- Base path: `/api`.
+- Request and response bodies use JSON unless an endpoint explicitly accepts `multipart/form-data`.
+- Active coaching sessions are kept in backend memory for the current demo loop.
+- Practice history, users, messages, feedback, and summaries are persisted in local SQLite.
+- API keys, provider tokens, `.env` contents, raw provider errors, and private credentials must never be returned to the frontend.
+- `provider` fields are informational labels only. They identify whether a result came from a real provider or fallback without exposing secrets.
+
+## Provider And Fallback Model
+
+Backend mock fallback and frontend local fallback are different:
+
+- Backend mock fallback means the backend returned a valid API response using deterministic local rules.
+- Frontend local fallback means the browser could not use the backend result and kept the demo moving with local data or local summary generation.
+
+Coaching endpoints return `provider="llm"` after a successful real LLM call and `provider="mock"` when deterministic fallback produced the response. `fallback_reason` may be present, but it must contain only a safe reason code.
+
+Pronunciation assessment returns `provider` and `is_fallback`. `provider="heuristic_mock"` means local transcript-based fallback produced the result.
+
+## Implemented Endpoints
+
+### GET /api/health
+
+Checks whether the backend is running.
+
+Response:
+
+```json
+{"status":"ok"}
+```
+
+### GET /api/scenarios
+
+Returns the scenario list shown by the frontend. Scenarios include IDs, Chinese and English titles, roles, goals, story seed fields, opening messages, conversation style, feedback focus, and useful expressions.
+
+Current status: implemented with static scenario catalog.
+
+### POST /api/sessions
+
+Starts a practice session in backend memory.
+
+Request:
 
 ```json
 {
-  "error": {
-    "code": "invalid_request",
-    "message": "scenarioId is required."
-  }
+  "scenario_id": "meeting",
+  "story_seed_id": "meeting_weekly_sync"
 }
 ```
 
-## Current Session-Based Coaching Contract
+`story_seed_id` is optional. If omitted, the backend selects one of the scenario's static story seeds. The response echoes the selected seed so later turns stay grounded in the same story.
 
-`POST /api/sessions` starts a practice session in backend memory. The request body carries `scenario_id` and an optional `story_seed_id`. Each scenario ships with at least three static story seeds; when `story_seed_id` is omitted, the backend randomly selects one of the scenario's seeds, and when it is provided, that exact seed is used (useful for deterministic demos and tests). The response returns `session_id`, `scenario_id`, the full `scenario` config, `story_seed_id`, `story_intro_zh`, `story_intro_en`, `opening_message`, empty `messages`, and `created_at`. Story intros are static, hand-written seeds 鈥?the backend never asks an LLM to invent a new story per request.
+### POST /api/chat
 
-Scenario objects now include `scenario_id`, `title`, `title_zh`, `ai_role`, `user_role`, `goal`, `story_seed_id`, `story_intro_zh`, `story_intro_en`, `opening_line`/`opening_message`, `conversation_style`, `feedback_focus`, and `useful_expressions`. `story_seed_id`/`story_intro_zh`/`story_intro_en` reflect the scenario's default seed; the seed actually used for a given session is echoed back on the `/api/sessions` response.
+Sends the latest user message and receives the next role-play reply plus quick feedback.
 
-`POST /api/chat` request shape:
+Request:
 
 ```json
 {
   "session_id": "session_demo",
   "scenario_id": "meeting",
-  "latest_user_message": "I want to 棰勭害涓€涓?meeting tomorrow.",
+  "latest_user_message": "I finished the page, but I have some problem with API.",
   "conversation_history": [
     {
       "role": "assistant",
@@ -47,51 +75,131 @@ Scenario objects now include `scenario_id`, `title`, `title_zh`, `ai_role`, `use
 }
 ```
 
-`POST /api/feedback` uses the same `session_id`, `scenario_id`, `latest_user_message`, and `conversation_history` shape. Its response includes `what_you_said`, `user_intent`, `recommended_english`, `issue`, `why`, `more_natural_option`, `score`, `score_breakdown` (an object with integer `grammar`, `naturalness`, `relevance`, and `clarity` fields), and `provider`. Feedback is graded strictly on `latest_user_message`; earlier turns are context only and are never re-scored.
-
-`POST /api/summary` receives `scenario_id` and full `conversation_history`; summaries and reusable expressions should be tied to the selected scenario goal. Its response also carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show whether the summary was generated by a real LLM call or by the deterministic local fallback, without ever exposing the underlying API key.
-
-`provider` is a small string enum returned by `/api/feedback`, `/api/summary`, and the chat endpoint's `quick_feedback`. It is purely informational 鈥?`"llm"` means the response came from a successful real-provider call, `"mock"` means the deterministic rule-based fallback produced it (because `LLM_PROVIDER_MODE` is not `llm`, required env vars are missing, or the live call failed). The backend only ever logs the provider mode and a short fallback-reason summary (e.g. exception type), never the API key, request payload, or raw error text.
-
-## ASR Provider API
-
-Speech recognition is optional and must keep text input available. API keys, app IDs, access tokens, resource IDs, and raw provider errors must never be returned to the browser.
-
-### GET /api/asr/mode
-
-Returns the active speech recognition mode.
-
-Current status: implemented.
-
-#### Response Example
+Response shape:
 
 ```json
 {
-  "asr_mode": "doubao"
+  "session_id": "session_demo",
+  "scenario_id": "meeting",
+  "reply": {
+    "role": "assistant",
+    "content": "Thanks for the update. What specific API fields do you need from the backend team?"
+  },
+  "quick_feedback": {
+    "what_you_said": "I finished the page, but I have some problem with API.",
+    "user_intent": "The learner wants to report progress and describe a blocker.",
+    "recommended_english": "I finished the first version of the page, but I have a problem with the API.",
+    "issue": "Use an article and refer to the specific API.",
+    "why": "This sounds more complete and professional in a meeting update.",
+    "more_natural_option": "The main blocker is that I need the backend team to confirm the API response format.",
+    "score": 78,
+    "score_breakdown": {
+      "grammar": 76,
+      "naturalness": 78,
+      "relevance": 86,
+      "clarity": 80
+    },
+    "provider": "mock",
+    "fallback_reason": null
+  },
+  "provider": "mock",
+  "fallback_reason": null
 }
 ```
 
-`"doubao"` is returned only when `ASR_PROVIDER_MODE=doubao` and the required Doubao credentials are present. Otherwise the endpoint returns `"browser"` so the frontend can use browser speech recognition or text input.
+### POST /api/feedback
+
+Generates feedback for the latest user message. Previous turns are context only and are not re-scored.
+
+Request fields:
+
+- `session_id`
+- `scenario_id`
+- `latest_user_message`
+- `conversation_history`
+
+Response includes:
+
+- `what_you_said`
+- `user_intent`
+- `recommended_english`
+- `issue`
+- `why`
+- `more_natural_option`
+- `score`
+- `score_breakdown.grammar`
+- `score_breakdown.naturalness`
+- `score_breakdown.relevance`
+- `score_breakdown.clarity`
+- `provider`
+- optional safe `fallback_reason`
+- optional compatibility fields such as `corrected_sentence`, `better_expression`, `user_intent_zh`, `code_switching_tip`
+
+### POST /api/summary
+
+Generates a post-session summary and scores.
+
+Request:
+
+```json
+{
+  "session_id": "session_demo",
+  "scenario_id": "interview",
+  "conversation_history": [
+    {"role": "assistant", "content": "Could you introduce yourself?"},
+    {"role": "user", "content": "I worked in a team project before."}
+  ]
+}
+```
+
+Response includes:
+
+- `summary`
+- `strengths`
+- `repeated_issues`
+- `better_expressions`
+- `scenario_completion`
+- `next_practice_focus`
+- optional `code_switching_advice`
+- `scores.grammar`
+- `scores.expression`
+- `scores.fluency`
+- `scores.scenario_completion`
+- `scores.overall`
+- `provider`
+- optional safe `fallback_reason`
+
+## ASR API
+
+Speech recognition is optional. Text input must remain available.
+
+### GET /api/asr/mode
+
+Returns active ASR mode:
+
+```json
+{"asr_mode":"browser"}
+```
+
+Returns `"doubao"` only when `ASR_PROVIDER_MODE=doubao` and required Doubao credentials are present. Otherwise returns `"browser"`.
 
 ### WebSocket /ws/asr
 
-Relays browser microphone audio to Doubao BigModel Streaming ASR.
+Relays browser microphone audio to Doubao BigModel Streaming ASR when enabled.
 
-Current status: implemented.
-
-Frontend to backend:
+Frontend sends:
 
 ```json
 {"type":"config","lang":"zh-CN"}
 ```
 
-Then send binary frames containing PCM 16-bit, 16 kHz, mono audio chunks. When the user stops speaking, send:
+Then sends PCM 16-bit, 16 kHz, mono binary audio chunks. When recording stops:
 
 ```json
 {"type":"end"}
 ```
 
-Backend to frontend:
+Backend sends:
 
 ```json
 {"type":"ready"}
@@ -100,181 +208,21 @@ Backend to frontend:
 {"type":"error","code":"network","message":"Doubao speech recognition is temporarily unavailable; switched back to browser speech recognition."}
 ```
 
-The backend supports the Volcano Engine BigModel ASR V3 binary frame protocol via `volcengine-audio`. New console credentials use `DOUBAO_API_KEY` plus `DOUBAO_RESOURCE_ID`; legacy console credentials can use `DOUBAO_APP_ID`, `DOUBAO_ASR_TOKEN`, and `DOUBAO_RESOURCE_ID`.
+Doubao credentials are backend-only. New console credentials use `DOUBAO_API_KEY` plus `DOUBAO_RESOURCE_ID`; legacy credentials can use `DOUBAO_APP_ID`, `DOUBAO_ASR_TOKEN`, and `DOUBAO_RESOURCE_ID`.
 
-ASR and pronunciation assessment are intentionally separate. Doubao ASR produces transcripts for the conversation flow. Pronunciation assessment may use the transcript plus an optional recording, but it does not replace ASR and must not expose provider credentials to the browser.
+## Pronunciation API
 
-Pronunciation assessment returns `provider` and `is_fallback`. `provider="heuristic_mock"` means the local transcript-based fallback produced the result. Generic API mode is enabled when `PRONUNCIATION_PROVIDER_MODE=api`, `PRONUNCIATION_API_KEY`, and `PRONUNCIATION_API_BASE_URL` are configured. iFlytek/XFYUN mode is enabled when `PRONUNCIATION_PROVIDER_MODE=xfyun`, `XFYUN_APP_ID`, `XFYUN_API_KEY`, and `XFYUN_API_SECRET` are configured. The generic `PRONUNCIATION_API_*` variables are not required for XFYUN mode. Missing configuration, timeouts, HTTP failures, WebSocket failures, and invalid API response schemas fall back to `heuristic_mock`.
+### POST /api/pronunciation/assess
 
-## GET /api/health
+Scores pronunciation for voice turns. It is separate from `/api/feedback`: feedback handles grammar/expression/scenario fit, while pronunciation assessment handles pronunciation, fluency, accuracy, completeness, rhythm, and spoken delivery tips.
 
-Checks whether the backend service is running.
+Current status: implemented with local `heuristic_mock` fallback, generic API provider mode, and optional iFlytek/XFYUN ISE provider mode.
 
-Current status: implemented.
-
-### Response Example
+JSON request:
 
 ```json
 {
-  "status": "ok"
-}
-```
-
-## GET /api/scenarios
-
-Returns the scenario list shown by the frontend. The MVP scenarios should appear first: Interview, Restaurant Ordering, and Meeting. Additional scenarios can be included after the stable MVP path is complete.
-
-Current status: planned. Can be implemented with static mock data first.
-
-### Response Example
-
-```json
-{
-  "scenarios": [
-    {
-      "id": "interview",
-      "title": "Interview",
-      "titleZh": "闈㈣瘯",
-      "level": "Intermediate",
-      "aiRole": "Hiring manager",
-      "userRole": "Job candidate",
-      "goal": "Practice introducing yourself, explaining experience, and asking professional follow-up questions.",
-      "openingLine": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?"
-    },
-    {
-      "id": "restaurant-ordering",
-      "title": "Restaurant Ordering",
-      "titleZh": "鐐归",
-      "level": "Beginner to Intermediate",
-      "aiRole": "Restaurant server",
-      "userRole": "Customer",
-      "goal": "Practice ordering food, asking for recommendations, clarifying preferences, and confirming the order.",
-      "openingLine": "Welcome! Are you ready to order, or would you like a few recommendations first?"
-    },
-    {
-      "id": "meeting",
-      "title": "Meeting",
-      "titleZh": "浼氳",
-      "level": "Intermediate",
-      "aiRole": "Team lead",
-      "userRole": "Team member",
-      "goal": "Practice giving updates, discussing blockers, asking for clarification, and agreeing on next steps.",
-      "openingLine": "Let's start with your update. What progress have you made since our last meeting?"
-    }
-  ]
-}
-```
-
-## POST /api/chat
-
-Sends a user message and receives the next role-play reply. The endpoint can also return brief per-turn feedback when there is a clear grammar or expression issue.
-
-Current status: planned. Can return mock role-play replies based on `scenarioId`.
-
-### Request Example
-
-```json
-{
-  "sessionId": "demo-session-001",
-  "scenarioId": "interview",
-  "messages": [
-    {
-      "id": "msg-001",
-      "role": "assistant",
-      "content": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?"
-    },
-    {
-      "id": "msg-002",
-      "role": "user",
-      "content": "I worked in a team project before and I was responsible to build the frontend page."
-    }
-  ],
-  "mode": "mock"
-}
-```
-
-### Response Example
-
-```json
-{
-  "sessionId": "demo-session-001",
-  "message": {
-    "id": "msg-003",
-    "role": "assistant",
-    "content": "Thanks for sharing that. Could you tell me more about the frontend work and how it helped the project?"
-  },
-  "quickFeedback": {
-    "grammar": {
-      "original": "responsible to build",
-      "suggestion": "responsible for building",
-      "reason": "After responsible for, use a noun or gerund form."
-    },
-    "expression": {
-      "original": "frontend page",
-      "suggestion": "frontend interface",
-      "reason": "Frontend interface sounds more natural when describing product work."
-    },
-    "encouragement": "Your answer is relevant to the interview scenario."
-  },
-  "isMock": true
-}
-```
-
-## POST /api/feedback
-
-Generates grammar and expression feedback for a specific user message or a recent group of turns. This endpoint is useful if the frontend wants feedback separately from the chat reply.
-
-Current status: planned. Can use mock rules before AI provider integration.
-
-### Request Example
-
-```json
-{
-  "sessionId": "demo-session-001",
-  "scenarioId": "interview",
-  "messageId": "msg-002",
-  "content": "I worked in a team project before and I was responsible to build the frontend page.",
-  "mode": "mock"
-}
-```
-
-### Response Example
-
-```json
-{
-  "messageId": "msg-002",
-  "feedback": {
-    "grammar": [
-      {
-        "original": "responsible to build",
-        "suggestion": "responsible for building",
-        "reason": "Use responsible for plus a noun or gerund."
-      }
-    ],
-    "expression": [
-      {
-        "original": "frontend page",
-        "suggestion": "frontend interface",
-        "reason": "This phrase sounds more natural in a professional interview answer."
-      }
-    ],
-    "encouragement": "The meaning is clear, and the example fits the interview goal."
-  },
-  "isMock": true
-}
-```
-
-## POST /api/pronunciation/assess
-
-Scores pronunciation for a voice turn without replacing `/api/feedback`. Text-only turns may skip this endpoint. The endpoint accepts JSON for transcript-only fallback and `multipart/form-data` with an `audio` file for real provider assessment. The frontend converts browser recordings to mono 16 kHz PCM before sending them to the backend when possible.
-
-Current status: implemented with a backend provider interface, iFlytek/XFYUN ISE support, generic API mode placeholder, and heuristic fallback.
-
-### Request Example
-
-```json
-{
-  "session_id": "session_xxx",
+  "session_id": "session_demo",
   "scenario_id": "daily_conversation",
   "user_message": "What do you do recently?",
   "transcript": "What do you do recently?",
@@ -284,11 +232,9 @@ Current status: implemented with a backend provider interface, iFlytek/XFYUN ISE
 }
 ```
 
-### Multipart Request Fields
+Multipart request fields:
 
-For real provider assessment, the frontend can send `multipart/form-data`:
-
-- `audio`: optional recording file. Browser recordings are converted to PCM 16-bit, 16 kHz, mono before upload when possible.
+- `audio`: optional recording file, converted by frontend to mono 16 kHz PCM when possible.
 - `session_id`
 - `scenario_id`
 - `user_message`
@@ -298,7 +244,7 @@ For real provider assessment, the frontend can send `multipart/form-data`:
 - `recognized_language`
 - `provider_mode`
 
-### Response Example
+Response:
 
 ```json
 {
@@ -309,117 +255,34 @@ For real provider assessment, the frontend can send `multipart/form-data`:
   "completeness_score": 82,
   "rhythm_score": 75,
   "overall_score": 78,
-  "feedback_zh": "这句话整体可以听懂，但表达略不自然。询问近况时，英语里更常用现在完成时。",
-  "strengths": ["语音输入内容完整", "主要意思可以被理解"],
-  "improvement_tips": ["可以跟读推荐句一次", "注意 recently 的位置和句子节奏"],
+  "feedback_zh": "这句话整体可以听懂，但表达略不自然。",
+  "strengths": ["语音输入内容完整"],
+  "improvement_tips": ["可以跟读推荐句一次"],
   "word_tips": ["recently", "been up to"],
   "is_fallback": true
 }
 ```
 
-Fallback scoring considers transcript length, Chinese-English mixing, repeated words or pause markers, incomplete endings, similarity to `reference_text`, and optional `audio_duration_ms` speaking pace. It keeps demo behavior stable without API credentials and avoids fixed identical scores for every turn.
-
-## POST /api/summary
-
-Ends or reviews a practice session and returns a post-session summary with scores. The frontend can call this after the user selects the end-practice action.
-
-Current status: planned. Can calculate deterministic mock scores first.
-
-### Request Example
-
-```json
-{
-  "sessionId": "demo-session-001",
-  "scenarioId": "interview",
-  "messages": [
-    {
-      "id": "msg-001",
-      "role": "assistant",
-      "content": "Hi, thanks for joining today. Could you briefly introduce yourself and tell me why you are interested in this role?"
-    },
-    {
-      "id": "msg-002",
-      "role": "user",
-      "content": "I worked in a team project before and I was responsible to build the frontend page."
-    },
-    {
-      "id": "msg-003",
-      "role": "assistant",
-      "content": "Thanks for sharing that. Could you tell me more about the frontend work and how it helped the project?"
-    }
-  ],
-  "mode": "mock"
-}
-```
-
-### Response Example
-
-```json
-{
-  "sessionId": "demo-session-001",
-  "summary": {
-    "overallPerformance": "You gave a relevant answer and connected your experience to the interview scenario. Your next step is to make the wording more professional and add a clearer result from the project.",
-    "strengths": [
-      "You answered the interview question directly.",
-      "You used a concrete project example."
-    ],
-    "repeatedIssues": [
-      "Preposition use after phrases such as responsible for.",
-      "Some wording can be more natural for professional settings."
-    ],
-    "betterExpressions": [
-      "I was responsible for building the frontend interface.",
-      "I contributed to a team project focused on user experience.",
-      "This helped our team present the product more clearly."
-    ],
-    "scenarioCompletion": "The learner introduced relevant project experience. A stronger answer would include the project result and one professional follow-up question.",
-    "nextPracticeFocus": "Practice describing one project with action, result, and reflection."
-  },
-  "scores": {
-    "grammar": 78,
-    "expression": 76,
-    "fluency": 80,
-    "scenarioCompletion": 72,
-    "overall": 76
-  },
-  "scoreScale": "0-100",
-  "isMock": true
-}
-```
-
-## Endpoint Implementation Order
-
-1. Keep `/api/health` as the smoke test endpoint.
-2. Add `/api/scenarios` with static scenario data.
-3. Add `/api/chat` with deterministic mock role-play replies.
-4. Add `/api/feedback` if feedback is separated from chat responses.
-5. Add `/api/summary` with mock summaries and scores.
-6. Replace mock internals with provider-backed logic only after the mock demo loop is stable.
-7. Add `/api/users/*` and `/api/history/*` for username/password users and practice history.
+Missing configuration, timeouts, HTTP failures, WebSocket failures, and invalid provider schemas fall back to `heuristic_mock`.
 
 ## User Auth API
 
 ### POST /api/users/register
 
-Creates a user with a unique username and password. No OAuth or complex registration validation is included. The backend stores a salted PBKDF2 password hash.
+Creates a username/password user. Passwords are stored as salted PBKDF2 hashes.
 
-Current status: implemented.
-
-#### Request Example
+Request:
 
 ```json
-{
-  "username": "jiaying",
-  "password": "lover-demo-13"
-}
+{"username":"demo_user","password":"demo-password"}
 ```
 
-#### Response Example
+Response:
 
 ```json
 {
   "user_id": "user_66ee86e050be",
-  "username": "jiaying",
+  "username": "demo_user",
   "created_at": "2026-06-07T03:43:38.456180+00:00"
 }
 ```
@@ -428,165 +291,31 @@ Returns HTTP 409 when the username already exists.
 
 ### POST /api/users/login
 
-Authenticates an existing user by username and password.
-
-Current status: implemented.
-
-#### Request Example
-
-```json
-{
-  "username": "jiaying",
-  "password": "lover-demo-13"
-}
-```
-
-#### Response Example
-
-```json
-{
-  "user_id": "user_66ee86e050be",
-  "username": "jiaying",
-  "created_at": "2026-06-07T03:43:38.456180+00:00"
-}
-```
+Authenticates an existing user.
 
 Returns HTTP 401 for invalid credentials.
 
 ### GET /api/users/{user_id}
 
-Returns the user's username and creation timestamp.
+Returns user ID, username, and creation time. Returns HTTP 404 when missing.
 
-Current status: implemented.
-
-#### Response Example
-
-```json
-{
-  "user_id": "user_66ee86e050be",
-  "username": "jiaying",
-  "created_at": "2026-06-07T03:43:38.456180+00:00"
-}
-```
-
-Returns HTTP 404 when the user does not exist.
 ## Practice History API
-
-Session records are stored in SQLite. Messages and per-turn feedback are saved individually. The post-session summary is stored as a JSON column.
 
 ### POST /api/history/sessions
 
-Saves a completed practice session including messages, feedback, and summary. Returns HTTP 404 if `user_id` is not found.
-
-Current status: implemented.
-
-#### Request Example
-
-```json
-{
-  "user_id": "user_66ee86e050be",
-  "session_id": "session_abc123",
-  "scenario_id": "interview",
-  "scenario_title": "闈㈣瘯娌熼€?,
-  "story_intro_zh": "浣犳鍦ㄥ弬鍔犱竴鍦洪潰璇曘€?,
-  "story_intro_en": "You are joining an interview.",
-  "messages": [
-    { "role": "assistant", "content": "Could you introduce yourself?" },
-    { "role": "user", "content": "I am a software engineer." }
-  ],
-  "feedbacks": [
-    {
-      "user_message": "I am a software engineer.",
-      "feedback_json": { "issue": "Clear answer.", "score_breakdown": {} },
-      "score": 85
-    }
-  ],
-  "summary": {
-    "summary": "Good session.",
-    "strengths": ["Clear introduction."],
-    "repeated_issues": [],
-    "better_expressions": []
-  },
-  "scores": { "overall": 85 },
-  "overall_score": 85,
-  "provider": "mock"
-}
-```
-
-#### Response Example
-
-```json
-{
-  "session_id": "session_abc123",
-  "scenario_id": "interview",
-  "scenario_title": "闈㈣瘯娌熼€?,
-  "started_at": "2026-06-07T03:50:00.000000+00:00",
-  "overall_score": 85,
-  "summary_preview": "Good session.",
-  "provider": "mock"
-}
-```
+Saves a completed practice session including scenario info, messages, feedbacks, summary JSON, scores, overall score, and provider label. Pronunciation assessment is saved inside per-turn feedback JSON when available.
 
 ### GET /api/history/sessions?user_id={user_id}
 
-Returns the user's practice sessions in reverse chronological order (most recent first). Defaults to the 20 most recent records.
-
-Current status: implemented.
-
-#### Response Example
-
-```json
-[
-  {
-    "session_id": "session_abc123",
-    "scenario_id": "interview",
-    "scenario_title": "闈㈣瘯娌熼€?,
-    "started_at": "2026-06-07T03:50:00.000000+00:00",
-    "overall_score": 85,
-    "summary_preview": "Good session.",
-    "provider": "mock"
-  }
-]
-```
+Returns the user's saved sessions in reverse chronological order.
 
 ### GET /api/history/sessions/{session_id}
 
-Returns the full detail of a saved practice session: scenario info, all messages, all feedback records, and the summary JSON.
+Returns full saved session detail: scenario info, messages, feedback records, summary JSON, overall score, and provider.
 
-Current status: implemented.
+## Not Implemented In Current Main
 
-#### Response Example
-
-```json
-{
-  "session_id": "session_abc123",
-  "scenario_id": "interview",
-  "scenario_title": "闈㈣瘯娌熼€?,
-  "story_intro_zh": "浣犳鍦ㄥ弬鍔犱竴鍦洪潰璇曘€?,
-  "story_intro_en": "You are joining an interview.",
-  "started_at": "2026-06-07T03:50:00.000000+00:00",
-  "ended_at": "2026-06-07T03:55:00.000000+00:00",
-  "overall_score": 85,
-  "summary_json": {
-    "summary": "Good session.",
-    "strengths": ["Clear introduction."],
-    "repeated_issues": [],
-    "better_expressions": []
-  },
-  "provider": "mock",
-  "messages": [
-    { "role": "assistant", "content": "Could you introduce yourself?" },
-    { "role": "user", "content": "I am a software engineer." }
-  ],
-  "feedbacks": [
-    {
-      "user_message": "I am a software engineer.",
-      "feedback_json": { "issue": "Clear answer." },
-      "score": 85
-    }
-  ]
-}
-```
-
-Returns HTTP 404 when the session does not exist.
-
+- Cloud TTS provider endpoint.
+- Cloud-synced multi-device history.
+- Phoneme-level pronunciation visualization.
+- Teacher dashboard or learning path API.

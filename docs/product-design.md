@@ -2,48 +2,41 @@
 
 ## Product Positioning
 
-AnytimeSpeak is an AI English speaking practice tool for learners who want realistic, scenario-based conversation training. It focuses on practical speaking confidence, useful corrections, and measurable improvement.
+AnytimeSpeak is an AI English speaking practice tool for learners who want realistic, scenario-based conversation training. It focuses on practical speaking confidence, useful corrections, measurable progress, and a stable demo path that works without private credentials.
 
-The MVP is designed for a course demo: it should be stable, easy to understand, and reproducible without private credentials.
+The UI is Chinese-first for navigation, scenario descriptions, feedback labels, and demo readability. English remains the practice language for role-play replies, recommended expressions, reusable phrases, and user speaking output.
 
-## Current Product Direction
+## Current Product Experience
 
-- Chinese-first UI for navigation, instructions, feedback labels, scenario difficulty tags, and focus tags.
-- English-first practice content for role-play replies, recommended expressions, and reusable phrases.
-- Session-based scenario coaching rather than isolated single-message chat.
-- Static story seeds for each scenario so every session starts with a concrete context.
-- Latest-turn feedback that corrects the most recent user message without re-scoring the whole dialogue.
-- Score breakdowns for per-turn feedback and post-session review.
-- Fixed viewport-height practice layout so conversation, voice input, and end button are always visible without scrolling.
-- Compact single-row chat composer: text input on the left, small mic button on the right, send button.
-- Voice input in English (`en-US`) only; no language toggle.
-- AI reply text sanitized to remove em dashes before display.
-- Scenarios sorted by difficulty level with beginner (`入门`) first.
-- AI reply auto-play through browser speech synthesis when supported.
-- User recording replay through browser recording APIs.
-- Backend LLM provider mode with deterministic mock fallback.
-- Optional Doubao Streaming ASR through a backend WebSocket relay.
-- Pronunciation assessment for voice turns with compact score feedback, heuristic fallback, and optional iFlytek/XFYUN ISE provider.
+- Chinese-first UI with a soft pink/lavender Lover-style visual direction.
+- Scenario cards for common real-life contexts such as interview, ordering food, meeting, travel, and daily conversation.
+- Session-based scenario coaching instead of isolated single-message chat.
+- Static story seeds with Chinese and English intros so each session starts from a concrete situation.
+- Compact practice layout with conversation, input, mic control, feedback, and end action in one focused workspace.
+- AI role-play replies that stay in scenario and continue the conversation.
+- Latest-turn feedback that corrects the newest user message without re-scoring earlier turns.
+- Browser speech input, optional Doubao Streaming ASR, browser speech synthesis playback, user recording replay, and text fallback.
+- Pronunciation assessment for voice turns only; text turns do not show fake pronunciation scores.
+- Username/password login and SQLite-backed history for saved sessions.
+- LLM provider mode plus deterministic backend mock fallback.
 
 ## Current User Flow
 
 1. Open the app.
-2. Optionally log in or register from the topbar.
-3. Choose a practice scenario (sorted beginner first).
-4. Read the Chinese story intro and the English story intro for the selected seed.
-5. Start the session-based conversation.
-6. Speak or type English input in the chat composer; mic button starts/stops voice input.
-7. Receive an AI role-play reply (sanitized text; playback may start automatically when supported).
-8. Review latest-turn feedback with recommended English, issue explanation, and score breakdown.
-8a. For voice turns, review a compact pronunciation assessment when available. Text turns show no pronunciation score.
-9. Replay the user's own recording when available.
-10. End the session.
-11. Review summary — scores show `—` while loading, then display the final values.
-12. Optionally review saved practice history in `练习历史`.
+2. Register or log in from the topbar, or continue practicing before saving history.
+3. Choose a scenario.
+4. Read the Chinese and English story intro for the selected seed.
+5. Start a session-based conversation.
+6. Speak or type English in the composer.
+7. Receive an AI role-play reply and optional auto-play.
+8. Review latest-turn feedback: recommended English, issue, explanation, natural option, score breakdown, and provider badge.
+9. For voice turns, review compact pronunciation feedback when available.
+10. Replay the user's own latest recording when browser support allows.
+11. End the session.
+12. Review post-session summary and scores.
+13. Open history to review saved sessions and details.
 
 ## Scenario Design
-
-The product is no longer only an early three-card MVP plan. The stable scenarios still include Interview, Restaurant Ordering, and Meeting, but the current scenario model also supports richer scenario metadata and additional scenarios.
 
 Each scenario includes:
 
@@ -57,13 +50,11 @@ Each scenario includes:
 - Feedback focus.
 - Useful expressions.
 
-Story seeds should be hand-written and deterministic. The backend should not ask an LLM to invent a new story per session.
+Story seeds are hand-written and deterministic. The backend does not ask an LLM to invent a new story per session.
 
 ## Feedback Design
 
-### Latest-Turn Feedback
-
-Feedback is tied to the latest user message. Previous turns provide context only.
+Latest-turn feedback is tied to the most recent user message. Previous turns provide context only.
 
 Current feedback includes:
 
@@ -71,44 +62,40 @@ Current feedback includes:
 - Interpreted user intent.
 - Recommended English.
 - Main issue.
-- Explanation of why the recommendation is better.
+- Why the recommendation is better.
 - More natural option.
 - Numeric score.
 - Score breakdown for grammar, naturalness, relevance, and clarity.
-- `provider` label showing whether the backend used LLM or mock fallback.
+- Provider label and safe fallback reason when available.
 
-### Pronunciation Assessment
+## Pronunciation Assessment
 
-Pronunciation assessment is a separate module from grammar/expression feedback. It appears for voice turns only and stays compact so it does not interrupt the conversation loop.
+Pronunciation assessment is a separate module from grammar/expression feedback. It appears for voice turns and stays compact so it does not interrupt the conversation.
 
 Current pronunciation feedback includes:
 
 - Overall pronunciation score.
-- Fluency, accuracy, and completeness scores.
-- One or two Chinese improvement tips.
-- Provider and fallback handling in the backend response.
-- Text-input no-assessment state instead of fake pronunciation scores.
+- Pronunciation, fluency, accuracy, completeness, and optional rhythm scores.
+- Chinese feedback and improvement tips.
+- Word-level tips when the fallback/provider can infer useful targets.
+- Provider and `is_fallback` state.
 
 The backend supports local heuristic scoring for stable demos and optional iFlytek/XFYUN ISE scoring when credentials are configured. Provider failures fall back to the heuristic result.
 
-### Post-Session Summary
+## Post-Session Summary
 
-The post-session summary should include:
+The summary includes:
 
-- Overall performance summary.
+- Overall performance.
 - Key strengths.
 - Repeated issues.
-- Better expressions the user can reuse.
+- Better expressions to reuse.
 - Scenario goal completion.
 - Suggested next practice focus.
 - Quantitative scores.
-- `provider` label.
+- Provider label.
 
-## Scoring Design
-
-Scores use a 0 to 100 scale. Current scoring can come from the LLM provider or deterministic mock rules.
-
-Post-session score dimensions:
+Scores use a 0-100 scale:
 
 - Grammar.
 - Expression.
@@ -116,64 +103,29 @@ Post-session score dimensions:
 - Scenario completion.
 - Overall.
 
-Initial weighting:
+## Voice Interaction
 
-- Grammar: 25%.
-- Expression: 25%.
-- Fluency: 20%.
-- Scenario completion: 30%.
-
-Latest-turn feedback uses:
-
-- Grammar.
-- Naturalness.
-- Relevance.
-- Clarity.
-
-## Voice Interaction Design
-
-### Speech Input
-
-- Use browser `SpeechRecognition` when available.
-- Use Doubao Streaming ASR through `/ws/asr` when `ASR_PROVIDER_MODE=doubao` and credentials are configured.
-- Treat voice as the primary practice action in supported browsers.
-- Let users start and stop recognition manually.
-- Convert recognized speech into editable text before sending.
-- Show clear fallback behavior when speech recognition is unavailable.
-
-### Speech Playback
-
-- Use browser `SpeechSynthesis` for AI replies.
-- Provide play and stop controls.
-- Support AI auto-play when available and enabled.
-
-### User Recording Replay
-
-- Use browser recording APIs where available.
-- Let users replay their own latest recording for self-review.
-- Keep replay optional because browser support and permission behavior can vary.
-
-### Text Fallback
-
-Text input is always available. It is the required stable fallback and ensures the demo works even when speech APIs are unavailable or unstable.
+- Browser `SpeechRecognition` is the default speech input path when supported.
+- Doubao Streaming ASR is available through `/ws/asr` when `ASR_PROVIDER_MODE=doubao` and backend credentials are configured.
+- Text input is always available and is the stable fallback.
+- Browser `SpeechSynthesis` plays AI replies where supported.
+- Browser recording APIs support user recording replay and pronunciation upload where available.
 
 ## Profile And History
 
-Practice history is implemented and available on `main`.
-
-Current status:
+Practice history is implemented on `main`.
 
 - Username/password registration and login from the topbar.
-- Completed sessions auto-saved after each practice ends (messages, feedback, summary, scores, provider label).
-- Pronunciation assessment is saved inside per-turn feedback JSON when available, so history detail can show the score without a database schema migration.
-- `练习历史` list and session detail views.
-- If save fails, the completed session remains in frontend state as a pending save; summary page shows a fallback note.
-- Passwords are stored with salted PBKDF2 hashes, never as plaintext.
-- SQLite database file (`backend/data/anytimespeak.db`) is a local runtime artifact, not committed.
+- Passwords are salted PBKDF2 hashes, never plaintext.
+- Completed sessions are saved to SQLite.
+- Messages, feedback, summary, scores, provider labels, and pronunciation assessment JSON can be reviewed later.
+- If save fails, the frontend keeps a pending session and shows a fallback note.
+- `backend/data/*.db` files are runtime artifacts and are ignored by git.
 
 ## Future Optimization
 
-- More stable history saving and retry behavior.
-- UI and demo polish for layout, loading states, and recording reliability.
-- Cloud TTS provider for voice output.
-- More detailed pronunciation and fluency evaluation after the current compact scoring module is stable.
+- Cloud TTS provider for lower-latency voice output.
+- Phoneme-level pronunciation feedback, stress, rhythm, and visual follow-reading.
+- More durable cloud history and multi-device sync.
+- Personalized learning path and long-term ability curve.
+- More scenarios, difficulty levels, and reusable expression review.
