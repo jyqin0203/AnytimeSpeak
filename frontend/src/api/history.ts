@@ -84,10 +84,20 @@ async function historyRequest<T>(path: string, init?: RequestInit): Promise<T> {
       headers: { "Content-Type": "application/json", ...init?.headers },
       signal: controller.signal,
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (!resp.ok) throw new HistoryRequestError(resp.status, `HTTP ${resp.status}`);
     return (await resp.json()) as T;
   } finally {
     window.clearTimeout(timeout);
+  }
+}
+
+export class HistoryRequestError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "HistoryRequestError";
+    this.status = status;
   }
 }
 

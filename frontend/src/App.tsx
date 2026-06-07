@@ -17,7 +17,9 @@ import {
   clearStoredUser,
   fetchSessionDetail,
   fetchSessionHistory,
+  fetchUser,
   formatDateTime,
+  HistoryRequestError,
   loadStoredUser,
   loginUser,
   providerLabel,
@@ -83,6 +85,18 @@ function App() {
   useEffect(() => {
     void loadScenarios();
   }, []);
+
+  useEffect(() => {
+    if (!authUser) return;
+
+    void fetchUser(authUser.userId).catch((error) => {
+      if (error instanceof HistoryRequestError && error.status === 404) {
+        clearStoredUser();
+        setAuthUser(null);
+        setHistorySaveNote("登录已失效：后端找不到当前用户。请重新登录或注册，当前练习会在登录后自动补存。");
+      }
+    });
+  }, [authUser]);
 
   useEffect(
     () => () => {
@@ -219,8 +233,16 @@ function App() {
       const items = await fetchSessionHistory(user.userId);
       setHistoryList(items);
       setHistoryStatus("idle");
-    } catch {
-      setHistorySaveNote("本次总结已生成，但历史记录保存失败。请保持登录，稍后可重新结束练习或重新登录后重试。");
+    } catch (error) {
+      if (error instanceof HistoryRequestError && error.status === 404) {
+        clearStoredUser();
+        setAuthUser(null);
+        setShowProfileModal(true);
+        setHistorySaveNote("本次总结已生成，但当前登录已失效。请重新登录或注册，系统会自动补存这次练习。");
+        return;
+      }
+
+      setHistorySaveNote("本次总结已生成，但历史记录保存失败。请确认后端服务正在运行，然后打开练习历史重试自动补存。");
     }
   };
 
@@ -291,7 +313,13 @@ function App() {
       const items = await fetchSessionHistory(authUser.userId);
       setHistoryList(items);
       setHistoryStatus("idle");
-    } catch {
+    } catch (error) {
+      if (error instanceof HistoryRequestError && error.status === 404) {
+        clearStoredUser();
+        setAuthUser(null);
+        setShowProfileModal(true);
+        setHistorySaveNote("登录已失效，请重新登录后查看历史。");
+      }
       setHistoryList([]);
       setHistoryStatus("error");
     }
