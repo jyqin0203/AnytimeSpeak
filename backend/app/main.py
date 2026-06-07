@@ -1,8 +1,9 @@
 from contextlib import asynccontextmanager
+import base64
 import sqlite3
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
@@ -123,8 +124,50 @@ def post_summary(request: SummaryRequest):
 
 
 @app.post("/api/pronunciation/assess", response_model=PronunciationAssessmentResponse)
-def post_pronunciation_assessment(request: PronunciationAssessmentRequest):
-    return assess_pronunciation_with_fallback(request)
+async def post_pronunciation_assessment(
+    raw_request: Request,
+):
+    content_type = raw_request.headers.get("content-type", "")
+    if content_type.startswith("multipart/form-data"):
+        form = await raw_request.form()
+        audio = form.get("audio")
+        if audio is None or not hasattr(audio, "read"):
+            raise HTTPException(status_code=422, detail="audio file is required")
+        audio_bytes = await audio.read()
+        scenario_id = _form_str(form, "scenario_id")
+        if not scenario_id:
+            raise HTTPException(status_code=422, detail="scenario_id is required")
+        request = PronunciationAssessmentRequest(
+            session_id=_form_str(form, "session_id"),
+            scenario_id=scenario_id,
+            user_message=_form_str(form, "user_message"),
+            transcript=_form_str(form, "transcript"),
+            audio_base64=base64.b64encode(audio_bytes).decode("ascii"),
+            audio_format=_form_str(form, "audio_format") or getattr(audio, "content_type", None) or getattr(audio, "filename", None),
+            audio_duration_ms=_form_int(form, "audio_duration_ms"),
+            recognized_language=_form_str(form, "recognized_language"),
+            reference_text=_form_str(form, "reference_text"),
+            provider_mode=_form_str(form, "provider_mode"),
+        )
+        return await assess_pronunciation_with_fallback(request)
+
+    payload = await raw_request.json()
+    return await assess_pronunciation_with_fallback(PronunciationAssessmentRequest(**payload))
+
+
+def _form_str(form, key: str) -> str | None:
+    value = form.get(key)
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _form_int(form, key: str) -> int | None:
+    value = _form_str(form, key)
+    if value is None:
+        return None
+    return int(value)
 
 
 # ── Guest user endpoints ──────────────────────────────────────────────────────

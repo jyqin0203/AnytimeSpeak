@@ -98,6 +98,8 @@ class PronunciationAssessmentRequest(BaseModel):
     user_message: str | None = None
     transcript: str | None = None
     audio_url: str | None = None
+    audio_base64: str | None = None
+    audio_format: str | None = None
     audio_duration_ms: int | None = Field(default=None, ge=0)
     recognized_language: str | None = None
     reference_text: str | None = None

@@ -264,7 +264,7 @@ Current status: planned. Can use mock rules before AI provider integration.
 
 ## POST /api/pronunciation/assess
 
-Scores pronunciation for a voice turn without replacing `/api/feedback`. Text-only turns may skip this endpoint.
+Scores pronunciation for a voice turn without replacing `/api/feedback`. Text-only turns may skip this endpoint. The endpoint accepts JSON for transcript-only fallback and `multipart/form-data` with an `audio` file for real provider assessment. The frontend converts browser recordings to mono 16 kHz PCM before sending them to the backend when possible.
 
 Current status: implemented with a backend provider interface and heuristic fallback.
 

@@ -238,6 +238,7 @@ function App() {
             referenceText: feedbackResult.value.recommendedEnglish,
             audioDurationMs: recording.durationMs,
             recognizedLanguage: "en-US",
+            audio: recording.blob,
           })
             .then((pronunciation) => {
               setFeedback((current) =>

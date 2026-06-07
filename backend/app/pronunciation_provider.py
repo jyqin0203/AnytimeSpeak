@@ -1,11 +1,22 @@
 import logging
 import os
 import re
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import ssl
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from email.utils import format_datetime
 from pathlib import Path
+from urllib.parse import quote, urlencode, urlparse
 from typing import Any
 
 import httpx
+import websockets
 from dotenv import load_dotenv
 
 from app.schemas import PronunciationAssessmentRequest, PronunciationAssessmentResponse
@@ -20,7 +31,7 @@ class PronunciationProviderError(ValueError):
     pass
 
 
-def assess_pronunciation_with_fallback(
+async def assess_pronunciation_with_fallback(
     request: PronunciationAssessmentRequest,
 ) -> PronunciationAssessmentResponse:
     config_reason = _config_fallback_reason(request.provider_mode)
@@ -28,8 +39,13 @@ def assess_pronunciation_with_fallback(
         return _mock_assessment(request, config_reason)
 
     try:
-        response = _api_assessment(request)
-        _log_provider_state("api")
+        provider_mode = _provider_mode(request.provider_mode)
+        response = (
+            await _xfyun_assessment(request)
+            if provider_mode == "xfyun"
+            else _api_assessment(request)
+        )
+        _log_provider_state(provider_mode)
         return response
     except Exception as exc:
         fallback_reason = _fallback_reason(exc)
@@ -84,6 +100,166 @@ def _response_from_api_data(data: dict[str, Any]) -> PronunciationAssessmentResp
         )
     except Exception as exc:
         raise PronunciationProviderError("Pronunciation API response schema is invalid.") from exc
+
+
+async def _xfyun_assessment(request: PronunciationAssessmentRequest) -> PronunciationAssessmentResponse:
+    if not request.audio_base64:
+        raise PronunciationProviderError("XFYUN pronunciation assessment requires audio_base64.")
+    reference = (request.reference_text or request.user_message or request.transcript or "").strip()
+    if not reference:
+        raise PronunciationProviderError("XFYUN pronunciation assessment requires reference_text.")
+
+    audio_bytes = base64.b64decode(request.audio_base64)
+    if not audio_bytes:
+        raise PronunciationProviderError("XFYUN audio payload is empty.")
+
+    url = _xfyun_authorized_url()
+    payloads = _xfyun_payloads(audio_bytes, reference)
+    result_chunks: list[str] = []
+
+    ssl_context = ssl.create_default_context()
+    async with websockets.connect(url, ssl=ssl_context, open_timeout=PRONUNCIATION_TIMEOUT_SECONDS) as websocket:
+        for payload in payloads:
+            await websocket.send(json.dumps(payload, ensure_ascii=False))
+            raw_response = await asyncio.wait_for(websocket.recv(), timeout=PRONUNCIATION_TIMEOUT_SECONDS)
+            data = json.loads(raw_response)
+            if int(data.get("code", 0)) != 0:
+                raise PronunciationProviderError("XFYUN pronunciation API returned non-zero code.")
+            result = data.get("data", {}).get("data")
+            if result:
+                result_chunks.append(str(result))
+            if int(data.get("data", {}).get("status", 0)) == 2:
+                break
+
+    if not result_chunks:
+        raise PronunciationProviderError("XFYUN pronunciation API returned no result.")
+
+    xml_text = base64.b64decode("".join(result_chunks)).decode("utf-8", errors="ignore")
+    return _response_from_xfyun_xml(xml_text)
+
+
+def _xfyun_authorized_url() -> str:
+    base_url = _xfyun_base_url()
+    parsed = urlparse(base_url)
+    host = parsed.netloc
+    path = parsed.path or "/v2/open-ise"
+    date = format_datetime(datetime.now(timezone.utc), usegmt=True)
+    signature_origin = f"host: {host}\ndate: {date}\nGET {path} HTTP/1.1"
+    signature_sha = hmac.new(
+        _xfyun_api_secret().encode("utf-8"),
+        signature_origin.encode("utf-8"),
+        digestmod=hashlib.sha256,
+    ).digest()
+    signature = base64.b64encode(signature_sha).decode("utf-8")
+    authorization_origin = (
+        f'api_key="{_xfyun_api_key()}", algorithm="hmac-sha256", '
+        f'headers="host date request-line", signature="{signature}"'
+    )
+    authorization = base64.b64encode(authorization_origin.encode("utf-8")).decode("utf-8")
+    query = urlencode({"authorization": authorization, "date": date, "host": host}, quote_via=quote)
+    return f"{base_url}?{query}"
+
+
+def _xfyun_payloads(audio_bytes: bytes, reference: str) -> list[dict[str, Any]]:
+    frame_size = 1280
+    frames = [audio_bytes[i : i + frame_size] for i in range(0, len(audio_bytes), frame_size)] or [b""]
+    payloads: list[dict[str, Any]] = []
+    encoded_reference = base64.b64encode(f"[content]\n{reference}".encode("utf-8")).decode("ascii")
+    for index, frame in enumerate(frames):
+        status = 0 if index == 0 else 1
+        payload: dict[str, Any] = {
+            "data": {
+                "status": status,
+                "data": base64.b64encode(frame).decode("ascii"),
+            }
+        }
+        if index == 0:
+            payload["common"] = {"app_id": _xfyun_app_id()}
+            payload["business"] = {
+                "sub": "ise",
+                "ent": _xfyun_language(),
+                "category": _xfyun_category(),
+                "cmd": "ssb",
+                "auf": _xfyun_audio_format(),
+                "aue": "raw",
+                "text": encoded_reference,
+                "tte": "utf-8",
+                "rstcd": "utf8",
+            }
+        payloads.append(payload)
+    payloads.append(
+        {
+            "data": {
+                "status": 2,
+                "data": "",
+            }
+        }
+    )
+    return payloads
+
+
+def _response_from_xfyun_xml(xml_text: str) -> PronunciationAssessmentResponse:
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError as exc:
+        raise PronunciationProviderError("XFYUN pronunciation XML is invalid.") from exc
+
+    nodes = list(root.iter())
+    score_source = _first_node_with_attrs(nodes, ("total_score", "accuracy_score", "fluency_score")) or root
+    overall = _score(_first_number(score_source, "total_score", "score", "overall_score", default=75))
+    accuracy = _score(_first_number(score_source, "accuracy_score", "phone_score", default=overall))
+    fluency = _score(_first_number(score_source, "fluency_score", "fluency", default=overall))
+    completeness = _score(_first_number(score_source, "integrity_score", "completeness_score", default=overall))
+    pronunciation = _score(_first_number(score_source, "phone_score", "accuracy_score", default=accuracy))
+    word_tips = _xfyun_word_tips(nodes)
+    tips = ["跟读推荐句，注意单词重音和连读节奏"]
+    if word_tips:
+        tips.insert(0, f"重点练习：{', '.join(word_tips[:3])}")
+
+    return PronunciationAssessmentResponse(
+        provider="xfyun_pronunciation",
+        pronunciation_score=pronunciation,
+        fluency_score=fluency,
+        accuracy_score=accuracy,
+        completeness_score=completeness,
+        rhythm_score=fluency,
+        overall_score=overall,
+        feedback_zh="科大讯飞语音评测已完成。本轮分数来自真实录音与参考文本的对比。",
+        strengths=["已完成真实录音发音测评"],
+        improvement_tips=tips[:3],
+        word_tips=word_tips[:3],
+        is_fallback=False,
+    )
+
+
+def _first_node_with_attrs(nodes: list[ET.Element], attrs: tuple[str, ...]) -> ET.Element | None:
+    for node in nodes:
+        if any(attr in node.attrib for attr in attrs):
+            return node
+    return None
+
+
+def _first_number(node: ET.Element, *attrs: str, default: int) -> float:
+    for attr in attrs:
+        raw = node.attrib.get(attr)
+        if raw is None:
+            continue
+        try:
+            return float(raw)
+        except ValueError:
+            continue
+    return float(default)
+
+
+def _xfyun_word_tips(nodes: list[ET.Element]) -> list[str]:
+    tips: list[str] = []
+    for node in nodes:
+        if node.tag.lower().endswith("word"):
+            content = node.attrib.get("content") or node.attrib.get("word")
+            score = _first_number(node, "total_score", "phone_score", "accuracy_score", default=100)
+            if content and score < 75:
+                tips.append(content)
+    return _dedupe(tips)
 
 
 def _mock_assessment(
@@ -261,14 +437,26 @@ def _normalize_text(text: str) -> str:
 
 def _config_fallback_reason(requested_mode: str | None) -> str | None:
     _load_dotenv_files()
-    provider_mode = (requested_mode or os.getenv("PRONUNCIATION_PROVIDER_MODE", "mock")).strip().lower()
-    if provider_mode != "api":
+    provider_mode = _provider_mode(requested_mode)
+    if provider_mode not in {"api", "xfyun"}:
         return "provider_mode_not_api"
+    if provider_mode == "xfyun":
+        if not _xfyun_app_id():
+            return "missing_xfyun_app_id"
+        if not _xfyun_api_key():
+            return "missing_xfyun_api_key"
+        if not _xfyun_api_secret():
+            return "missing_xfyun_api_secret"
+        return None
     if not _api_key():
         return "missing_api_key"
     if not _api_base_url():
         return "missing_base_url"
     return None
+
+
+def _provider_mode(requested_mode: str | None) -> str:
+    return (requested_mode or os.getenv("PRONUNCIATION_PROVIDER_MODE", "mock")).strip().lower()
 
 
 def _load_dotenv_files() -> None:
@@ -292,13 +480,44 @@ def _api_model() -> str:
     return os.getenv("PRONUNCIATION_MODEL", "").strip() or "pronunciation-assessment"
 
 
+def _xfyun_app_id() -> str:
+    return os.getenv("XFYUN_APP_ID", "").strip()
+
+
+def _xfyun_api_key() -> str:
+    return os.getenv("XFYUN_API_KEY", "").strip()
+
+
+def _xfyun_api_secret() -> str:
+    return os.getenv("XFYUN_API_SECRET", "").strip()
+
+
+def _xfyun_base_url() -> str:
+    return os.getenv("XFYUN_ISE_BASE_URL", "").strip() or "wss://ise-api.xfyun.cn/v2/open-ise"
+
+
+def _xfyun_language() -> str:
+    return os.getenv("XFYUN_ISE_LANGUAGE", "").strip() or "en_vip"
+
+
+def _xfyun_category() -> str:
+    return os.getenv("XFYUN_ISE_CATEGORY", "").strip() or "read_sentence"
+
+
+def _xfyun_audio_format() -> str:
+    return os.getenv("XFYUN_ISE_AUDIO_FORMAT", "").strip() or "audio/L16;rate=16000"
+
+
 def _fallback_reason(exc: Exception) -> str:
     if isinstance(exc, httpx.TimeoutException):
         return "pronunciation_api_timeout"
     if isinstance(exc, httpx.HTTPStatusError):
         return f"pronunciation_api_http_{exc.response.status_code}"
     if isinstance(exc, PronunciationProviderError):
-        return "pronunciation_api_schema_invalid"
+        message = str(exc)
+        return "xfyun_pronunciation_failed" if "XFYUN" in message else "pronunciation_api_schema_invalid"
+    if isinstance(exc, (websockets.WebSocketException, asyncio.TimeoutError, json.JSONDecodeError)):
+        return "xfyun_pronunciation_failed"
     return "pronunciation_api_failed"
 
 
@@ -307,8 +526,8 @@ def _log_provider_state(provider: str, fallback_reason: str | None = None) -> No
     log(
         "pronunciation_provider: provider=%s provider_mode=%s api_key_present=%s fallback_reason=%s",
         provider,
-        os.getenv("PRONUNCIATION_PROVIDER_MODE", "mock").strip().lower(),
-        bool(_api_key()),
+        _provider_mode(None),
+        bool(_api_key() or _xfyun_api_key()),
         fallback_reason or "none",
     )
 
