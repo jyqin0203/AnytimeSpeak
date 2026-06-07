@@ -153,9 +153,11 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
           cleanupWs();
           return;
         }
-        // Send optional config (language)
+        // Send config then start audio capture immediately so the mic button
+        // enters recording state without waiting for the Doubao "ready" signal.
         ws!.send(JSON.stringify({ type: "config", lang: options.lang ?? "zh-CN" }));
         setupAudioCapture(mediaStream);
+        callbacks.onStart?.();
       };
 
       ws.onmessage = (event: MessageEvent<string>) => {
@@ -168,7 +170,7 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
         }
 
         if (data.type === "ready") {
-          callbacks.onStart?.();
+          // Backend confirmed Doubao connection — already in listening state.
           return;
         }
 

@@ -1220,6 +1220,12 @@ function Practice({
             {sendStatus === "loading" ? "..." : "发送"}
           </button>
         </form>
+        {speechInput.error && (
+          <p className="asr-error" role="alert">
+            {asrProvider.id === "doubao-asr" ? "豆包语音：" : "语音识别："}
+            {speechInput.error.message}
+          </p>
+        )}
       </div>
 
       <aside className="feedback-panel">

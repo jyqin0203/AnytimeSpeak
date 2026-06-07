@@ -782,6 +782,14 @@ dd {
   flex-shrink: 0;
 }
 
+.asr-error {
+  grid-column: 1 / -1;
+  font-size: 0.78rem;
+  color: var(--danger, #c0392b);
+  margin: 0.25rem 0 0;
+  padding: 0 0.2rem;
+}
+
 .chat-input {
   min-height: 2.85rem;
   border: 1px solid var(--line);
