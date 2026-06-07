@@ -1152,6 +1152,51 @@ dd {
   text-align: center;
 }
 
+.pronunciation-mini {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.72rem;
+  border: 1px solid rgba(232, 106, 168, 0.28);
+  border-radius: 0.75rem;
+  background: rgba(255, 244, 250, 0.72);
+}
+
+.pronunciation-mini.muted {
+  border-color: var(--line);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.pronunciation-mini-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.pronunciation-mini-head strong {
+  color: #d64686;
+  font-size: 1.35rem;
+  line-height: 1;
+}
+
+.pronunciation-score-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.pronunciation-score-row span {
+  display: block;
+  padding: 0.32rem 0.4rem;
+  border-radius: 0.55rem;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-align: center;
+  text-transform: none;
+}
+
 .score-pill {
   position: absolute;
   top: 0.8rem;

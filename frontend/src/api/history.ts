@@ -224,6 +224,23 @@ export async function saveSessionHistory(payload: SaveHistoryPayload): Promise<H
         more_natural_option: f.moreNaturalOption,
         score_breakdown: f.scoreBreakdown,
         provider: f.provider,
+        pronunciation_assessment: f.pronunciation
+          ? {
+              provider: f.pronunciation.provider,
+              pronunciation_score: f.pronunciation.pronunciationScore,
+              fluency_score: f.pronunciation.fluencyScore,
+              accuracy_score: f.pronunciation.accuracyScore,
+              completeness_score: f.pronunciation.completenessScore,
+              rhythm_score: f.pronunciation.rhythmScore ?? null,
+              overall_score: f.pronunciation.overallScore,
+              feedback_zh: f.pronunciation.feedbackZh,
+              strengths: f.pronunciation.strengths,
+              improvement_tips: f.pronunciation.improvementTips,
+              word_tips: f.pronunciation.wordTips,
+              is_fallback: f.pronunciation.isFallback,
+            }
+          : null,
+        pronunciation_input_mode: f.pronunciationInputMode ?? "text",
       },
       score: f.score,
     })),

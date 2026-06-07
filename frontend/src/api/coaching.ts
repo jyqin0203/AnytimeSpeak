@@ -44,6 +44,22 @@ export type Feedback = {
   scoreBreakdown: FeedbackScoreBreakdown;
   provider: string;
   fallbackReason?: string | null;
+  pronunciation?: PronunciationAssessment | null;
+  pronunciationInputMode?: "voice" | "text";
+};
+export type PronunciationAssessment = {
+  provider: string;
+  pronunciationScore: number;
+  fluencyScore: number;
+  accuracyScore: number;
+  completenessScore: number;
+  rhythmScore?: number | null;
+  overallScore: number;
+  feedbackZh: string;
+  strengths: string[];
+  improvementTips: string[];
+  wordTips: string[];
+  isFallback: boolean;
 };
 export type ScoreBreakdown = Record<"语法" | "表达" | "流畅" | "完成度" | "综合", number>;
 export type SessionSummary = {
@@ -105,6 +121,20 @@ type ApiFeedback = {
   fallback_reason?: string | null;
 };
 type ApiChatResponse = { reply: ApiChatMessage; provider: string; fallback_reason?: string | null; quick_feedback?: ApiFeedback };
+type ApiPronunciationAssessment = {
+  provider: string;
+  pronunciation_score: number;
+  fluency_score: number;
+  accuracy_score: number;
+  completeness_score: number;
+  rhythm_score?: number | null;
+  overall_score: number;
+  feedback_zh: string;
+  strengths: string[];
+  improvement_tips: string[];
+  word_tips: string[];
+  is_fallback: boolean;
+};
 type ApiSummaryResponse = {
   summary: string;
   strengths: string[];
@@ -134,6 +164,7 @@ const REQUEST_TIMEOUTS_MS: Record<string, number> = {
   "/api/sessions": 10000,
   "/api/chat": 120000,
   "/api/feedback": 120000,
+  "/api/pronunciation/assess": 25000,
   "/api/summary": 150000,
 };
 
@@ -374,6 +405,52 @@ export async function fetchTurnFeedback(
     },
     provider: response.provider,
     fallbackReason: response.fallback_reason ?? null,
+  };
+}
+
+export async function assessPronunciation({
+  scenario,
+  sessionId,
+  userMessage,
+  transcript,
+  referenceText,
+  audioDurationMs,
+  recognizedLanguage,
+}: {
+  scenario: Scenario;
+  sessionId: string | null;
+  userMessage: string;
+  transcript: string;
+  referenceText?: string | null;
+  audioDurationMs?: number;
+  recognizedLanguage?: string;
+}): Promise<PronunciationAssessment> {
+  const response = await request<ApiPronunciationAssessment>("/api/pronunciation/assess", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: sessionId,
+      scenario_id: scenario.id,
+      user_message: userMessage,
+      transcript,
+      reference_text: referenceText ?? userMessage,
+      audio_duration_ms: audioDurationMs,
+      recognized_language: recognizedLanguage,
+    }),
+  });
+
+  return {
+    provider: response.provider,
+    pronunciationScore: response.pronunciation_score,
+    fluencyScore: response.fluency_score,
+    accuracyScore: response.accuracy_score,
+    completenessScore: response.completeness_score,
+    rhythmScore: response.rhythm_score ?? null,
+    overallScore: response.overall_score,
+    feedbackZh: sanitizeAiText(response.feedback_zh),
+    strengths: response.strengths.map(sanitizeAiText),
+    improvementTips: response.improvement_tips.map(sanitizeAiText),
+    wordTips: response.word_tips.map(sanitizeAiText),
+    isFallback: response.is_fallback,
   };
 }
 

@@ -29,12 +29,15 @@ from app.llm_provider import (
 )
 from app.mock_service import list_scenarios
 from app.mock_service import start_session
+from app.pronunciation_provider import assess_pronunciation_with_fallback
 from app.schemas import (
     ChatRequest,
     ChatResponse,
     FeedbackRequest,
     FeedbackResponse,
     PracticeSession,
+    PronunciationAssessmentRequest,
+    PronunciationAssessmentResponse,
     Scenario,
     StartSessionRequest,
     SummaryRequest,
@@ -117,6 +120,11 @@ def post_feedback(request: FeedbackRequest):
 @app.post("/api/summary", response_model=SummaryResponse)
 def post_summary(request: SummaryRequest):
     return create_summary_with_fallback(request)
+
+
+@app.post("/api/pronunciation/assess", response_model=PronunciationAssessmentResponse)
+def post_pronunciation_assessment(request: PronunciationAssessmentRequest):
+    return assess_pronunciation_with_fallback(request)
 
 
 # ── Guest user endpoints ──────────────────────────────────────────────────────

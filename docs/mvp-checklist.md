@@ -51,6 +51,7 @@ Status labels:
 - [x] Done: `provider` distinguishes `"llm"` from backend `"mock"` results.
 - [x] Done: `fallback_reason` can explain backend mock fallback without exposing secrets.
 - [x] Done: Frontend local fallback is separate from backend mock fallback.
+- [x] Done: Pronunciation assessment has a backend API provider interface with safe heuristic fallback.
 - [ ] Pending verification: Provider badges/status text are legible in the final demo.
 - [ ] Pending verification: LLM provider path works when valid credentials are configured.
 - [x] Done: Mock fallback keeps the demo reproducible without API keys.
@@ -62,6 +63,7 @@ Status labels:
 - [x] Done: Speech playback uses browser `SpeechSynthesis` where supported.
 - [x] Done: AI reply auto-play is supported where browser playback works.
 - [x] Done: User recording replay exists through browser recording support.
+- [x] Done: Voice turns can show pronunciation assessment from transcript-based fallback.
 - [ ] Pending verification: Speech recognition works reliably in the recording browser.
 - [ ] Pending verification: AI auto-play works reliably in the recording browser.
 - [ ] Pending verification: User recording replay works reliably in the recording browser.
@@ -72,6 +74,7 @@ Status labels:
 - [x] Done: Feedback includes recommended English.
 - [x] Done: Feedback includes issue and explanation fields.
 - [x] Done: Feedback includes score breakdown for grammar, naturalness, relevance, and clarity.
+- [x] Done: Voice-turn feedback can include pronunciation, fluency, accuracy, completeness, and overall pronunciation scores.
 - [x] Done: Post-session summary includes overall performance.
 - [x] Done: Post-session summary includes key strengths.
 - [x] Done: Post-session summary includes repeated issues.
@@ -86,6 +89,7 @@ Status labels:
 - [x] Done: Username/password registration and login.
 - [x] Done: SQLite Practice History API and UI.
 - [x] Done: Auto-save completed sessions to history.
+- [x] Done: Pronunciation assessment is saved inside per-turn feedback JSON when available.
 - [x] Done: History list and session detail review (`练习历史`).
 - [x] Done: SQLite runtime database files are ignored by `.gitignore`.
 - [ ] Pending verification: Verify profile/history save and retry behavior before the final demo recording.

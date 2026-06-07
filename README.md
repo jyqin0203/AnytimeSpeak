@@ -9,6 +9,7 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 - AI role-play replies based on the selected scenario.
 - Grammar correction and expression improvement suggestions.
 - Latest-turn feedback with score breakdown.
+- Pronunciation assessment with a backend API provider interface and deterministic heuristic fallback.
 - Post-session summary.
 - Quantitative scoring for grammar, expression, fluency, scenario completion, and overall performance.
 - Browser speech input, AI speech playback, user recording replay, and text fallback.
@@ -19,6 +20,7 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 - Backend: FastAPI + Python
 - Speech input: browser `SpeechRecognition`
 - Speech playback: browser `SpeechSynthesis`
+- Pronunciation assessment: backend provider interface with mock/heuristic fallback by default
 - Storage: SQLite for username/password users and practice history; backend in-memory sessions for the active coaching flow
 - AI integration: environment-variable based LLM configuration with mock mode fallback
 
@@ -26,7 +28,7 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 
 The project includes a mock-first MVP practice loop: scenario selection with static story seeds, session-based role-play chat, latest-turn feedback with a `grammar`/`naturalness`/`relevance`/`clarity` score breakdown, post-session summary, scoring, browser speech input/playback, user recording replay, and text input. The UI is Chinese-first for instructions and feedback labels while keeping practice content, AI role-play replies, and recommended English expressions in English.
 
-The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching. Every chat/feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key.
+The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching. Every chat/feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key. Pronunciation assessment is available at `/api/pronunciation/assess`; when no pronunciation API is configured, or when the API fails, the backend returns a stable `heuristic_mock` result based on transcript quality and the recommended English reference.
 
 Username/password auth and practice history are supported. Users can register or log in from the topbar, then open `练习历史` to review saved sessions. Passwords are stored with salted PBKDF2 hashes, never as plaintext. The backend stores users, session metadata, messages, per-turn feedback, and post-session summaries in a local SQLite database (`backend/data/anytimespeak.db`). After each practice session the frontend automatically saves the record; users can log out, log back in, and still see their history. If saving fails, the completed session remains in the current frontend state as a pending save and the summary page shows a fallback note.
 
@@ -132,6 +134,17 @@ New console credentials use `DOUBAO_API_KEY` plus `DOUBAO_RESOURCE_ID`. Legacy c
 `DOUBAO_ASR_URL` defaults to the recommended async bidirectional streaming endpoint, `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async`. It can be changed to `.../bigmodel` for packet-by-packet bidirectional streaming or `.../bigmodel_nostream` for streaming-input mode. `DOUBAO_RESULT_TYPE` is optional and defaults to `full`; set it to `single` only when you want incremental transcript chunks.
 
 When enabled, the frontend records microphone audio as PCM 16-bit, 16 kHz, mono and streams it to the backend `/ws/asr` relay. The backend connects to Doubao over WebSocket, sends the required binary ASR frames, and relays `partial` / `final` transcript events back to the browser. Missing or invalid Doubao configuration falls back to browser speech recognition or text input.
+
+### Pronunciation Assessment
+
+Pronunciation assessment is mock-first by default:
+
+- `PRONUNCIATION_PROVIDER_MODE=mock` or unset: use local heuristic fallback.
+- `PRONUNCIATION_PROVIDER_MODE=api` with `PRONUNCIATION_API_KEY` and `PRONUNCIATION_API_BASE_URL`: attempt a generic backend-only pronunciation API call.
+- `PRONUNCIATION_PROVIDER_MODE=xfyun` with `XFYUN_APP_ID`, `XFYUN_API_KEY`, and `XFYUN_API_SECRET`: call iFlytek/XFYUN streaming pronunciation assessment from the backend. Browser recordings are converted to mono 16 kHz PCM before upload.
+- `PRONUNCIATION_MODEL` is optional.
+
+Missing configuration, timeouts, HTTP failures, or invalid API responses fall back to `heuristic_mock`. Pronunciation secrets are never sent to the frontend.
 
 ## Demo Video
 
