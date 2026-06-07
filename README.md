@@ -111,6 +111,28 @@ Copy `.env.example` to `.env` for local provider configuration. Do not commit `.
 The backend automatically loads provider variables from `.env` in the project root or `backend/.env`, while shell environment variables still take priority.
 Real provider mode requires `LLM_PROVIDER_MODE=llm`, an `LLM_API_KEY` or `OPENAI_API_KEY`, plus explicit `LLM_BASE_URL` and `LLM_MODEL` values. Missing configuration falls back to mock mode with a safe reason code.
 
+### Doubao BigModel Streaming ASR
+
+Doubao ASR is optional. The default `ASR_PROVIDER_MODE=browser` keeps the reproducible browser `SpeechRecognition` fallback. To enable the Volcano Engine BigModel ASR relay:
+
+1. Open the Volcano Engine speech console and enable the BigModel speech recognition service.
+2. Copy `.env.example` to `.env`.
+3. Set the provider mode and credentials:
+
+```env
+ASR_PROVIDER_MODE=doubao
+DOUBAO_API_KEY=your-new-console-app-key
+DOUBAO_RESOURCE_ID=volc.seedasr.sauc.duration
+DOUBAO_ASR_URL=wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async
+DOUBAO_RESULT_TYPE=full
+```
+
+New console credentials use `DOUBAO_API_KEY` plus `DOUBAO_RESOURCE_ID`. Legacy console credentials can use `DOUBAO_APP_ID`, `DOUBAO_ASR_TOKEN`, and `DOUBAO_RESOURCE_ID` instead. Resource IDs are service-specific; common examples are `volc.bigasr.sauc.duration` for Doubao 1.0 and `volc.seedasr.sauc.duration` for Doubao 2.0.
+
+`DOUBAO_ASR_URL` defaults to the recommended async bidirectional streaming endpoint, `wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async`. It can be changed to `.../bigmodel` for packet-by-packet bidirectional streaming or `.../bigmodel_nostream` for streaming-input mode. `DOUBAO_RESULT_TYPE` is optional and defaults to `full`; set it to `single` only when you want incremental transcript chunks.
+
+When enabled, the frontend records microphone audio as PCM 16-bit, 16 kHz, mono and streams it to the backend `/ws/asr` relay. The backend connects to Doubao over WebSocket, sends the required binary ASR frames, and relays `partial` / `final` transcript events back to the browser. Missing or invalid Doubao configuration falls back to browser speech recognition or text input.
+
 ## Demo Video
 
 Demo video link: TBD
@@ -136,7 +158,7 @@ See `frontend/src/speech/types.ts` for the provider interfaces and `backend/app/
 ## Originality and Third-Party Dependencies
 
 - Original project code: project scaffold, backend health endpoint, frontend MVP flow, backend coaching endpoints, Doubao ASR provider integration, and documentation are maintained in this repository.
-- Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, HTTPX, and websockets.
+- Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, HTTPX, websockets, and volcengine-audio.
 - AI APIs or AI-generated code usage: optional LLM provider calls and optional Doubao Streaming ASR are configured through environment variables; mock mode and browser fallback remain the defaults for reproducible demos. Environment variable placeholders are listed in `.env.example`.
 - API keys, private credentials, and unauthorized assets must not be committed.
 

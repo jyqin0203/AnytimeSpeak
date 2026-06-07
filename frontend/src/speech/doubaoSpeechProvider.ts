@@ -58,6 +58,7 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
     let sourceNode: MediaStreamAudioSourceNode | null = null;
     let stream: MediaStream | null = null;
     let disposed = false;
+    let endSent = false;
     let finalAccum = "";
 
     const cleanupAudio = () => {
@@ -75,14 +76,21 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
       stream = null;
     };
 
-    const cleanupWs = () => {
+    const sendEnd = () => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         try {
-          ws.send(JSON.stringify({ type: "end" }));
+          if (!endSent) {
+            ws.send(JSON.stringify({ type: "end" }));
+            endSent = true;
+          }
         } catch {
           // ignore
         }
       }
+    };
+
+    const cleanupWs = () => {
+      sendEnd();
       ws?.close();
       ws = null;
     };
@@ -198,7 +206,7 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
 
         const result: SpeechRecognitionResult = {
           transcript: displayTranscript,
-          finalTranscript: isFinal ? finalAccum : finalAccum,
+          finalTranscript: isFinal ? text : finalAccum,
           interimTranscript: isFinal ? "" : text,
           isFinal,
           language: options.lang ?? "zh-CN",
@@ -234,7 +242,7 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
       },
       stop: () => {
         cleanupAudio();
-        cleanupWs();
+        sendEnd();
       },
       abort: () => {
         disposed = true;
