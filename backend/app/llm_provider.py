@@ -25,6 +25,11 @@ from app.schemas import (
 
 
 LLM_TIMEOUT_SECONDS = 90.0
+CHAT_REPLY_MAX_CHARS = 260
+FEEDBACK_SHORT_MAX_CHARS = 90
+FEEDBACK_MEDIUM_MAX_CHARS = 140
+SUMMARY_TEXT_MAX_CHARS = 180
+SUMMARY_ITEM_MAX_CHARS = 90
 
 logger = logging.getLogger("uvicorn.error")
 logger.setLevel(logging.INFO)
@@ -129,13 +134,13 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
         scores = data.get("scores", {})
         response = SummaryResponse(
             scenario_id=request.scenario_id,
-            summary=str(data["summary"]),
-            strengths=_string_list(data["strengths"]),
-            repeated_issues=_string_list(data["repeated_issues"]),
-            better_expressions=_string_list(data["better_expressions"]),
-            scenario_completion=str(data["scenario_completion"]),
-            next_practice_focus=str(data["next_practice_focus"]),
-            code_switching_advice=_optional_string(data.get("code_switching_advice")),
+            summary=_clean_llm_text(data["summary"], SUMMARY_TEXT_MAX_CHARS),
+            strengths=_string_list(data["strengths"], limit=3, max_chars=SUMMARY_ITEM_MAX_CHARS),
+            repeated_issues=_string_list(data["repeated_issues"], limit=3, max_chars=SUMMARY_ITEM_MAX_CHARS),
+            better_expressions=_string_list(data["better_expressions"], limit=3, max_chars=SUMMARY_ITEM_MAX_CHARS),
+            scenario_completion=_clean_llm_text(data["scenario_completion"], SUMMARY_TEXT_MAX_CHARS),
+            next_practice_focus=_clean_llm_text(data["next_practice_focus"], SUMMARY_TEXT_MAX_CHARS),
+            code_switching_advice=_optional_string(data.get("code_switching_advice"), SUMMARY_TEXT_MAX_CHARS),
             scores=ScoreBreakdown(
                 grammar=int(scores["grammar"]),
                 expression=int(scores["expression"]),
@@ -248,6 +253,9 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
                     "feels alive rather than scripted. "
                     "Keep replies natural, brief (one to three sentences), and easy to read aloud "
                     "for spoken practice. "
+                    "Prefer one or two short sentences under 45 words total. "
+                    "Use plain punctuation only: no em dashes, repeated punctuation, Markdown "
+                    "bullets, numbered lists, or overly formal coaching language. "
                     "If the learner's message is unclear, briefly acknowledge what you did "
                     "understand and ask exactly one specific clarifying question. "
                     "If the learner drifts off-topic, respond naturally and briefly, then gently "
@@ -297,6 +305,11 @@ def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
                     "template sentence. more_natural_option must also stay anchored in the "
                     "learner's actual words, offered as a slightly more natural or polished "
                     "alternative phrasing of the same idea. "
+                    "Keep feedback compact for a small side card: user_intent, issue, and why "
+                    "should each be one short sentence; recommended_english and "
+                    "more_natural_option should each be one sentence. "
+                    "Use plain punctuation only: no em dashes, repeated punctuation, Markdown, "
+                    "bullet lists, or long paragraphs. "
                     "Never reply with generic filler such as 'No major grammar issue'. Even when "
                     "the grammar is correct, comment on spoken naturalness, fit with the "
                     "scenario, or clarity, and suggest one concrete way to sound more like a "
@@ -346,6 +359,12 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
                     "Make the summary mostly in Chinese, but keep reusable expressions in English. "
                     "Assess performance using the scenario goal, the story the learner practiced, "
                     "and the scoring focus. "
+                    "Keep the result compact: summary should be one short sentence; strengths, "
+                    "repeated_issues, and better_expressions should contain at most three short "
+                    "items each; scenario_completion and next_practice_focus should each be one "
+                    "short sentence. "
+                    "Use plain punctuation only: no em dashes, repeated punctuation, Markdown, "
+                    "bullet markers inside strings, or long paragraphs. "
                     "If the learner used Chinese-English mixed input multiple times, include a "
                     "practical 中英转换建议 in code_switching_advice. "
                     "Return JSON only with keys summary, strengths, repeated_issues, "
@@ -414,9 +433,9 @@ def _chat_message_from_data(data: Any) -> ChatMessage:
     if isinstance(data, dict):
         return ChatMessage(
             role=data.get("role", "assistant"),
-            content=str(data["content"]),
+            content=_clean_llm_text(data["content"], CHAT_REPLY_MAX_CHARS),
         )
-    return ChatMessage(role="assistant", content=str(data))
+    return ChatMessage(role="assistant", content=_clean_llm_text(data, CHAT_REPLY_MAX_CHARS))
 
 
 def _feedback_from_data(data: Any) -> FeedbackResponse:
@@ -424,37 +443,43 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
         raise ValueError("Feedback must be a JSON object.")
     if "what_you_said" in data:
         score = int(data["score"])
+        recommended_english = _clean_llm_text(data["recommended_english"], FEEDBACK_MEDIUM_MAX_CHARS)
+        more_natural_option = _clean_llm_text(data["more_natural_option"], FEEDBACK_MEDIUM_MAX_CHARS)
+        why = _clean_llm_text(data["why"], FEEDBACK_MEDIUM_MAX_CHARS)
         return FeedbackResponse(
             what_you_said=str(data["what_you_said"]),
-            user_intent=str(data["user_intent"]),
-            recommended_english=str(data["recommended_english"]),
-            issue=str(data["issue"]),
-            why=str(data["why"]),
-            more_natural_option=str(data["more_natural_option"]),
+            user_intent=_clean_llm_text(data["user_intent"], FEEDBACK_SHORT_MAX_CHARS),
+            recommended_english=recommended_english,
+            issue=_clean_llm_text(data["issue"], FEEDBACK_SHORT_MAX_CHARS),
+            why=why,
+            more_natural_option=more_natural_option,
             score=score,
             score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
             provider="llm",
-            corrected_sentence=str(data["recommended_english"]),
-            better_expression=str(data["more_natural_option"]),
-            user_intent_zh=_optional_string(data.get("user_intent")),
-            code_switching_tip=_optional_string(data.get("why")),
+            corrected_sentence=recommended_english,
+            better_expression=more_natural_option,
+            user_intent_zh=_optional_string(data.get("user_intent"), FEEDBACK_SHORT_MAX_CHARS),
+            code_switching_tip=why,
         )
 
     score = int(data["score"])
+    corrected_sentence = _clean_llm_text(data["corrected_sentence"], FEEDBACK_MEDIUM_MAX_CHARS)
+    better_expression = _clean_llm_text(data["better_expression"], FEEDBACK_MEDIUM_MAX_CHARS)
+    issue = _clean_llm_text(data["issue"], FEEDBACK_SHORT_MAX_CHARS)
     return FeedbackResponse(
         what_you_said=str(data.get("what_you_said", "")),
-        user_intent=_optional_string(data.get("user_intent_zh")) or "",
-        recommended_english=str(data["corrected_sentence"]),
-        issue=str(data["issue"]),
-        why=_optional_string(data.get("code_switching_tip")) or str(data["issue"]),
-        more_natural_option=str(data["better_expression"]),
+        user_intent=_optional_string(data.get("user_intent_zh"), FEEDBACK_SHORT_MAX_CHARS) or "",
+        recommended_english=corrected_sentence,
+        issue=issue,
+        why=_optional_string(data.get("code_switching_tip"), FEEDBACK_MEDIUM_MAX_CHARS) or issue,
+        more_natural_option=better_expression,
         score=score,
         score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
         provider="llm",
-        corrected_sentence=str(data["corrected_sentence"]),
-        better_expression=str(data["better_expression"]),
-        user_intent_zh=_optional_string(data.get("user_intent_zh")),
-        code_switching_tip=_optional_string(data.get("code_switching_tip")),
+        corrected_sentence=corrected_sentence,
+        better_expression=better_expression,
+        user_intent_zh=_optional_string(data.get("user_intent_zh"), FEEDBACK_SHORT_MAX_CHARS),
+        code_switching_tip=_optional_string(data.get("code_switching_tip"), FEEDBACK_MEDIUM_MAX_CHARS),
     )
 
 
@@ -485,16 +510,44 @@ def _clamp_breakdown_value(value: Any) -> int:
     return max(0, min(100, int(value)))
 
 
-def _string_list(value: Any) -> list[str]:
+def _string_list(value: Any, *, limit: int | None = None, max_chars: int | None = None) -> list[str]:
     if not isinstance(value, list):
         raise ValueError("Expected a list.")
-    return [str(item) for item in value]
+    items = value[:limit] if limit is not None else value
+    return [_clean_llm_text(item, max_chars) for item in items]
 
 
-def _optional_string(value: Any) -> str | None:
+def _optional_string(value: Any, max_chars: int | None = None) -> str | None:
     if value is None:
         return None
-    return str(value)
+    return _clean_llm_text(value, max_chars)
+
+
+def _clean_llm_text(value: Any, max_chars: int | None = None) -> str:
+    text = str(value)
+    text = re.sub(r"[\u2014\u2015]", " - ", text)
+    text = re.sub(r"\s*\u2013\s*", "-", text)
+    text = re.sub(r"([!?.,;:])\1+", r"\1", text)
+    text = re.sub(r"\s+([!?.,;:])", r"\1", text)
+    text = re.sub(r"[ \t\r\n]+", " ", text).strip()
+    if max_chars is not None and len(text) > max_chars:
+        text = _truncate_text(text, max_chars)
+    return text
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    clipped = text[:max_chars].rstrip()
+    sentence_end = max(
+        clipped.rfind("."),
+        clipped.rfind("!"),
+        clipped.rfind("?"),
+        clipped.rfind("。"),
+        clipped.rfind("！"),
+        clipped.rfind("？"),
+    )
+    if sentence_end >= max_chars * 0.55:
+        return clipped[: sentence_end + 1].strip()
+    return clipped.rstrip(" ,;:，；：") + "..."
 
 
 def _transcript(messages: list[ChatMessage]) -> str:
