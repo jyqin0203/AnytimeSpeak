@@ -4,7 +4,13 @@
 
 AnytimeSpeak is a course challenge project focused on AI English speaking practice. The goal is to help learners rehearse realistic English conversations in common scenarios and receive actionable feedback after practice.
 
-The project prioritizes a complete and stable MVP demo over a broad but fragile feature set. The first version will support text input as the reliable baseline, then add browser-based speech input and speech playback.
+The project prioritizes a complete and stable MVP demo over a broad but fragile feature set. The current MVP path includes a React + Vite + TypeScript frontend, a FastAPI backend, session-based scenario coaching, browser speech input/playback, user recording replay, LLM provider mode, and deterministic mock fallback.
+
+## Scope Update
+
+Early planning treated complex cloud accounts and cloud history as Non-MVP. That remains true: username/password login, OAuth, cloud sync, and long-term multi-device history are not required for the core MVP demo.
+
+However, a lightweight Guest Profile plus local SQLite Practice History has been promoted into the demo-enhancement track. On current `main`, the stable source of truth is README Current Status, `docs/api-contract.md`, and current code. If a feature branch or Draft PR has Guest Profile / Practice History work, describe it as in progress until merged. Do not duplicate that work or claim it is implemented on `main` before the API and README confirm it.
 
 ## Topic Requirements
 
@@ -57,17 +63,17 @@ The MVP should deliver this complete loop:
 
 1. User selects a practice scenario.
 2. User enters a practice page.
-3. User sends English input. Text input is supported first, speech input is added later.
+3. User sends English input. Voice is the preferred supported-browser path; text input remains the stable fallback.
 4. AI replies in role according to the selected scenario.
 5. The system gives grammar and expression feedback at a reasonable time.
 6. User ends the practice.
 7. The system generates a post-session summary and quantitative scores.
 
-MVP scenarios:
+MVP scenario coverage:
 
-- Interview
-- Restaurant ordering
-- Meeting
+- Interview, Restaurant Ordering, and Meeting remain the core scenarios.
+- Additional scenarios may be present when the stable core path still works.
+- Each scenario should include static story seeds with Chinese and English intros.
 
 MVP feedback dimensions:
 
@@ -82,7 +88,7 @@ MVP feedback dimensions:
 The following are valuable but not prioritized before the stable MVP:
 
 - Full pronunciation phoneme-level scoring.
-- Long-term user accounts and cloud history.
+- Full username/password accounts, OAuth, and cloud-synced history.
 - Payment or subscription features.
 - Multi-user conversation rooms.
 - Native mobile apps.
@@ -100,7 +106,7 @@ The following are valuable but not prioritized before the stable MVP:
 - TypeScript
 - Browser `SpeechRecognition` for speech input where supported
 - Browser `SpeechSynthesis` for speech playback
-- `localStorage` or mock data for MVP session history
+- Text fallback when browser speech features are unavailable
 
 ### Backend
 
@@ -108,6 +114,8 @@ The following are valuable but not prioritized before the stable MVP:
 - Python
 - Environment-variable based LLM configuration
 - Mock response mode when no API key is available
+- Backend in-memory sessions for the active coaching flow
+- Local SQLite only for lightweight Guest Profile / Practice History when that feature is merged
 
 ### AI Layer
 
