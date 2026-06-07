@@ -24,11 +24,13 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 
 ## Current Status
 
-The project includes a mock-first MVP practice loop: scenario selection with static story seeds, session-based role-play chat, latest-turn feedback with a `grammar`/`naturalness`/`relevance`/`clarity` score breakdown, post-session summary, scoring, browser speech input/playback, user recording replay, and text input fallback. The UI is Chinese-first for instructions and feedback labels while keeping practice content, AI role-play replies, and recommended English expressions in English.
+The project includes a mock-first MVP practice loop: scenario selection with static story seeds, session-based role-play chat, latest-turn feedback with a `grammar`/`naturalness`/`relevance`/`clarity` score breakdown, post-session summary, scoring, browser speech input/playback, user recording replay, and text input. The UI is Chinese-first for instructions and feedback labels while keeping practice content, AI role-play replies, and recommended English expressions in English.
 
 The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching. Every chat/feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key.
 
-Username/password auth and practice history are now supported. Users can register or log in from the topbar, then open `History` / `练习历史` to review saved sessions. Passwords are stored with salted PBKDF2 hashes, never as plaintext. The backend stores users, session metadata, messages, per-turn feedback, and post-session summaries in a local SQLite database (`backend/data/anytimespeak.db`). After each practice session the frontend automatically saves the record; users can log out, log back in, and still see their history. If saving fails, the completed session remains in the current frontend state as a pending save and the summary page shows a fallback note.
+Username/password auth and practice history are supported. Users can register or log in from the topbar, then open `练习历史` to review saved sessions. Passwords are stored with salted PBKDF2 hashes, never as plaintext. The backend stores users, session metadata, messages, per-turn feedback, and post-session summaries in a local SQLite database (`backend/data/anytimespeak.db`). After each practice session the frontend automatically saves the record; users can log out, log back in, and still see their history. If saving fails, the completed session remains in the current frontend state as a pending save and the summary page shows a fallback note.
+
+The practice page uses a fixed viewport-height layout so the message list, chat input, mic button, and end button are all visible without scrolling. The voice input is a compact single-row composer: a text field on the left, a small microphone button on the right (click once to start, click again to stop and send), and a send button. There is no separate language toggle. The post-session summary shows `—` while scores are loading instead of a placeholder number. AI reply text is sanitized to remove em dashes before display. Scenario difficulty and focus tags are displayed in Chinese; scenarios are sorted by level with beginner scenarios first.
 
 ## Local Development
 
@@ -131,9 +133,9 @@ Related preparation docs:
 
 Near-term PRs:
 
-1. Guest Profile and SQLite Practice History, if not already merged.
-2. Practice layout and demo usability improvements.
-3. Username/password login and more stable practice history.
+1. ~~Guest Profile and SQLite Practice History~~ — merged.
+2. ~~Practice layout and UI/UX improvements~~ — merged.
+3. ~~Username/password login and practice history~~ — merged.
 4. Streaming ASR provider.
 5. Final submission materials.
 

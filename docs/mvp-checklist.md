@@ -29,8 +29,8 @@ Status labels:
 - [x] Done: Feedback is shown without replacing the role-play conversation.
 - [x] Done: End-session action and summary view exist.
 - [x] Done: Text input remains available as the stable fallback path.
-- [ ] Pending verification: Loading, disabled, and error states are clear in the final demo path.
-- [ ] Pending verification: Summary and score views are readable on the target demo screen size.
+- [x] Done: Loading, disabled, and error states are clear in the final demo path.
+- [x] Done: Summary and score views are readable on the target demo screen size.
 
 ## Backend
 
@@ -81,14 +81,14 @@ Status labels:
 - [x] Done: Scores include grammar, expression, fluency, scenario completion, and overall score.
 - [x] Done: Score scale is 0 to 100.
 
-## Guest Profile And Practice History
+## Profile And Practice History
 
-- [ ] Not in current main: Guest Profile API and UI.
-- [ ] Not in current main: SQLite Practice History API and UI.
-- [ ] Not in current main: Auto-save completed sessions to history.
-- [ ] Not in current main: History list and session detail review.
+- [x] Done: Username/password registration and login.
+- [x] Done: SQLite Practice History API and UI.
+- [x] Done: Auto-save completed sessions to history.
+- [x] Done: History list and session detail review (`练习历史`).
 - [x] Done: SQLite runtime database files are ignored by `.gitignore`.
-- [ ] Pending verification: If PR13 or another branch is used for demo recording, verify profile/history save and retry behavior before showing it.
+- [ ] Pending verification: Verify profile/history save and retry behavior before the final demo recording.
 
 ## README
 
