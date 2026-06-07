@@ -139,6 +139,30 @@ const REQUEST_TIMEOUTS_MS: Record<string, number> = {
 
 export const localScenarios: Scenario[] = [
   {
+    id: "restaurant",
+    scenarioId: "ordering_food",
+    title: "餐厅点餐",
+    englishTitle: "Ordering Food",
+    description: "从询问推荐到确认偏好，练习礼貌、清楚的日常服务场景表达。",
+    aiRole: "餐厅服务员",
+    userRole: "顾客",
+    goal: "点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
+    storySeedId: "ordering_cafe",
+    storyIntroZh: "午餐时间你走进一家有点忙的咖啡店。队伍在往前移动，你需要礼貌地询问推荐、说明偏好，并确认最终点单。",
+    storyIntroEn:
+      "It's lunchtime and you walk into a slightly busy cafe. The line is moving forward, so you need to politely ask for recommendations, explain your preferences, and confirm your final order.",
+    level: "入门",
+    duration: "6 分钟",
+    focus: ["礼貌请求", "偏好说明", "订单确认"],
+    usefulExpressions: ["I'd like...", "Could I have...", "Does this come with..."],
+    openingLine: "Welcome! Are you ready to order, or would you like a few recommendations first?",
+    replies: [
+      "Of course. Our grilled salmon is popular today. Do you have any allergies or preferences?",
+      "Great choice. Would you like that with rice, salad, or roasted vegetables?",
+      "Perfect. I will place that order for you. Would you like anything to drink?",
+    ],
+  },
+  {
     id: "interview",
     scenarioId: "interview",
     title: "面试沟通",
@@ -161,30 +185,6 @@ export const localScenarios: Scenario[] = [
       "Thanks for sharing that. Can you describe one project where you made a clear impact?",
       "That sounds useful. What challenge did you face, and how did you handle it?",
       "Good example. Before we finish, what would you like to know about the team or role?",
-    ],
-  },
-  {
-    id: "restaurant",
-    scenarioId: "ordering_food",
-    title: "餐厅点餐",
-    englishTitle: "Ordering Food",
-    description: "从询问推荐到确认偏好，练习礼貌、清楚的日常服务场景表达。",
-    aiRole: "餐厅服务员",
-    userRole: "顾客",
-    goal: "点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
-    storySeedId: "ordering_cafe",
-    storyIntroZh: "午餐时间你走进一家有点忙的咖啡店。队伍在往前移动，你需要礼貌地询问推荐、说明偏好，并确认最终点单。",
-    storyIntroEn:
-      "It's lunchtime and you walk into a slightly busy cafe. The line is moving forward, so you need to politely ask for recommendations, explain your preferences, and confirm your final order.",
-    level: "入门",
-    duration: "6 分钟",
-    focus: ["礼貌请求", "偏好说明", "订单确认"],
-    usefulExpressions: ["I'd like...", "Could I have...", "Does this come with..."],
-    openingLine: "Welcome! Are you ready to order, or would you like a few recommendations first?",
-    replies: [
-      "Of course. Our grilled salmon is popular today. Do you have any allergies or preferences?",
-      "Great choice. Would you like that with rice, salad, or roasted vegetables?",
-      "Perfect. I will place that order for you. Would you like anything to drink?",
     ],
   },
   {
@@ -265,11 +265,17 @@ function normalizeFocus(tag: string): string {
   return FOCUS_ZH[tag.toLowerCase()] ?? tag;
 }
 
+const LEVEL_ORDER: Record<string, number> = { "入门": 0, "进阶": 1, "高级": 2 };
+
+function levelOrder(level: string): number {
+  return LEVEL_ORDER[level] ?? 99;
+}
+
 export async function fetchScenarios(): Promise<Scenario[]> {
   const apiScenarios = await request<ApiScenario[]>("/api/scenarios");
   const localById = new Map(localScenarios.map((scenario) => [scenario.id, scenario]));
 
-  return apiScenarios.map((scenario) => {
+  const mapped = apiScenarios.map((scenario) => {
     const local = localById.get(scenario.id);
     return {
       id: scenario.id,
@@ -291,6 +297,7 @@ export async function fetchScenarios(): Promise<Scenario[]> {
       replies: local?.replies ?? [scenario.opening_line],
     };
   });
+  return mapped.sort((a, b) => levelOrder(a.level) - levelOrder(b.level));
 }
 
 export async function startPracticeSession(scenario: Scenario): Promise<PracticeSession> {
