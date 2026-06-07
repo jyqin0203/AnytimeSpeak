@@ -26,6 +26,7 @@ import {
   type GuestUser,
   type HistorySessionDetail,
   type HistorySessionItem,
+  type SaveHistoryPayload,
 } from "./api/history";
 import { VoiceControls } from "./components/VoiceControls";
 import {
@@ -74,13 +75,9 @@ function App() {
   const [historyDetailStatus, setHistoryDetailStatus] = useState<AsyncState>("idle");
   const [historySaveNote, setHistorySaveNote] = useState<string | null>(null);
 
-  // Snapshot of session data used for saving history after summary
-  const sessionSnapshotRef = useRef<{
-    scenario: Scenario;
-    messages: Message[];
-    feedbacks: Feedback[];
-    sessionId: string;
-  } | null>(null);
+  // Pending save payload: always stored after endPractice so it can be
+  // saved retroactively when the user creates a profile.
+  const pendingHistoryRef = useRef<Omit<SaveHistoryPayload, "userId"> | null>(null);
 
   useEffect(() => {
     void loadScenarios();
@@ -214,23 +211,44 @@ function App() {
     void sendText(text, recording);
   };
 
+  // Tries to save to the backend. If the stored user is a local-fallback ID
+  // (created when backend was down), it first syncs the user to the backend.
+  const trySaveHistory = async (
+    user: GuestUser,
+    payload: Omit<SaveHistoryPayload, "userId">,
+  ) => {
+    let effectiveUser = user;
+
+    if (user.userId.startsWith("local_")) {
+      try {
+        const realUser = await createGuestUser(user.displayName);
+        storeUser(realUser);
+        setGuestUser(realUser);
+        effectiveUser = realUser;
+      } catch {
+        setHistorySaveNote("本次总结已生成，但历史记录保存失败（练习服务暂不可用）。");
+        return;
+      }
+    }
+
+    try {
+      await saveSessionHistory({ ...payload, userId: effectiveUser.userId });
+      pendingHistoryRef.current = null;
+    } catch {
+      setHistorySaveNote("本次总结已生成，但历史记录保存失败。");
+    }
+  };
+
   const endPractice = async () => {
     const fallbackSummary = createLocalSummary(messages, feedback);
     setSummary(fallbackSummary);
     setSummaryStatus("loading");
     setHistorySaveNote(null);
 
-    // Save a snapshot before navigating away
     const snapshotScenario = selected;
-    const snapshotMessages = messages;
-    const snapshotFeedbacks = feedback;
+    const snapshotMessages = [...messages];
+    const snapshotFeedbacks = [...feedback];
     const snapshotSessionId = sessionId ?? `local_${Date.now()}`;
-    sessionSnapshotRef.current = {
-      scenario: snapshotScenario,
-      messages: snapshotMessages,
-      feedbacks: snapshotFeedbacks,
-      sessionId: snapshotSessionId,
-    };
 
     setView("summary");
 
@@ -254,21 +272,22 @@ function App() {
       setStatusText("前端完全请求不到后端，已展示前端本地模式生成的总结。");
     }
 
-    // Auto-save history if user is logged in
+    // Always store the pending payload so it can be saved later if the user
+    // creates a profile after viewing the summary.
+    const pendingPayload: Omit<SaveHistoryPayload, "userId"> = {
+      sessionId: snapshotSessionId,
+      scenario: snapshotScenario,
+      messages: snapshotMessages,
+      feedbacks: snapshotFeedbacks,
+      summary: resolvedSummary,
+      provider: resolvedProvider,
+    };
+    pendingHistoryRef.current = pendingPayload;
+
     if (guestUser) {
-      try {
-        await saveSessionHistory({
-          userId: guestUser.userId,
-          sessionId: snapshotSessionId,
-          scenario: snapshotScenario,
-          messages: snapshotMessages,
-          feedbacks: snapshotFeedbacks,
-          summary: resolvedSummary,
-          provider: resolvedProvider,
-        });
-      } catch {
-        setHistorySaveNote("本次总结已生成，但历史记录保存失败。");
-      }
+      await trySaveHistory(guestUser, pendingPayload);
+    } else {
+      setHistorySaveNote("创建练习档案即可保存本次练习记录。点击右上角「创建档案」。");
     }
   };
 
@@ -303,13 +322,14 @@ function App() {
   };
 
   const handleCreateProfile = async (displayName: string) => {
+    let createdUser: GuestUser | null = null;
     try {
       const user = await createGuestUser(displayName);
       storeUser(user);
       setGuestUser(user);
       setShowProfileModal(false);
+      createdUser = user;
     } catch {
-      // Backend unavailable: create a local-only profile
       const localUser: GuestUser = {
         userId: `local_${Date.now()}`,
         displayName,
@@ -318,6 +338,18 @@ function App() {
       storeUser(localUser);
       setGuestUser(localUser);
       setShowProfileModal(false);
+    }
+
+    // If we got a real backend user and there's a pending session, save it now.
+    const pending = pendingHistoryRef.current;
+    if (createdUser && pending) {
+      try {
+        await saveSessionHistory({ ...pending, userId: createdUser.userId });
+        pendingHistoryRef.current = null;
+        setHistorySaveNote(null);
+      } catch {
+        setHistorySaveNote("档案创建成功，但历史记录保存失败，请稍后再试。");
+      }
     }
   };
 
@@ -900,7 +932,7 @@ function Practice({
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestFeedback = feedback[feedback.length - 1];
-  const latestScore = latestFeedback?.score ?? 82;
+  const latestScore = latestFeedback?.score ?? null;
   const [speechLanguage, setSpeechLanguage] = useState("zh-CN");
   const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
   const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
@@ -1078,8 +1110,8 @@ function Practice({
       <aside className="feedback-panel">
         <div className="coach-score">
           <span>本轮表现</span>
-          <strong>{latestScore}</strong>
-          <p>反馈放在旁边累积，不打断对话主线。</p>
+          <strong>{latestScore !== null ? latestScore : "—"}</strong>
+          <p>{latestScore !== null ? "反馈放在旁边累积，不打断对话主线。" : "发送第一句话后，这里会显示本轮评分。"}</p>
         </div>
         <div className="panel-title compact">
           <h2>即时反馈</h2>
