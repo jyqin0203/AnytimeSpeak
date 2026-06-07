@@ -30,7 +30,7 @@ from app.llm_provider import (
 )
 from app.mock_service import list_scenarios
 from app.mock_service import start_session
-from app.pronunciation_provider import assess_pronunciation_with_fallback
+from app.pronunciation_provider import assess_pronunciation_with_fallback, load_pronunciation_env
 from app.schemas import (
     ChatRequest,
     ChatResponse,
@@ -48,6 +48,7 @@ from app.schemas import (
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
     init_db()
+    load_pronunciation_env()
     yield
 
 

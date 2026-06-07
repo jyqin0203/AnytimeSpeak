@@ -31,6 +31,20 @@ class PronunciationProviderError(ValueError):
     pass
 
 
+def load_pronunciation_env() -> None:
+    """Load local pronunciation provider env files and log safe configuration state."""
+    _load_dotenv_files()
+    logger.info(
+        "pronunciation_provider: env_loaded provider_mode=%s generic_api_key_present=%s "
+        "xfyun_app_id_present=%s xfyun_api_key_present=%s xfyun_api_secret_present=%s",
+        _provider_mode(None),
+        bool(_api_key()),
+        bool(_xfyun_app_id()),
+        bool(_xfyun_api_key()),
+        bool(_xfyun_api_secret()),
+    )
+
+
 async def assess_pronunciation_with_fallback(
     request: PronunciationAssessmentRequest,
 ) -> PronunciationAssessmentResponse:
