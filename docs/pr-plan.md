@@ -18,25 +18,34 @@ This section is the canonical PR workflow for Codex/Coding Agents working on thi
 
 ### Required Tools
 
-Use local Git plus GitHub CLI. On this Windows machine, the tools may not be available through `PATH`, so use absolute paths first:
+Use local Git for branch, commit, and push. On this Windows machine, Git is available through the absolute path below, while GitHub CLI is not currently installed or available through `PATH`.
 
 ```powershell
 & 'C:\Program Files\Git\cmd\git.exe' --version
-& 'C:\Program Files\GitHub CLI\gh.exe' --version
-& 'C:\Program Files\GitHub CLI\gh.exe' auth status
 ```
 
-If GitHub CLI is not logged in, ask the repository owner to run:
+Current local checks from this machine:
 
 ```powershell
-& 'C:\Program Files\GitHub CLI\gh.exe' auth login
+where.exe gh
+Test-Path 'C:\Program Files\GitHub CLI\gh.exe'
+Test-Path 'C:\Program Files (x86)\GitHub CLI\gh.exe'
+Test-Path "$env:LOCALAPPDATA\Programs\GitHub CLI\gh.exe"
 ```
 
-If `gh` reports that it cannot find `git`, fix the current shell session with:
+Expected current result: no `gh` executable is found.
+
+Codex GitHub plugin is enabled in this user's Codex config:
 
 ```powershell
-$env:Path = 'C:\Program Files\Git\cmd;' + $env:Path
+# C:\Users\86183\.codex\config.toml
+[plugins."github@openai-curated"]
+enabled = true
 ```
+
+However, plugin installation does not guarantee that the GitHub connector tool is exposed inside an already-running Codex session. If the connector tool is not visible to the agent, start a new Codex session after installing/enabling the plugin, then ask the agent to create the PR from the already-pushed branch.
+
+If GitHub CLI is preferred, install `gh`, make sure it is on `PATH` or document its absolute path, then authenticate it with `gh auth login`.
 
 ### Start From Remote Main
 
@@ -75,16 +84,22 @@ Do not use `git add -A` when unrelated local changes exist.
 
 ### Create The Draft PR
 
-Prepare a Markdown body file that includes the required PR sections, then create the draft PR:
+Prepare a Markdown body with the required PR sections. Prefer the GitHub plugin connector when it is visible in the current Codex tool list. If the connector is not available but `gh` is installed and authenticated, create the draft PR with GitHub CLI:
 
 ```powershell
-& 'C:\Program Files\GitHub CLI\gh.exe' pr create `
+gh pr create `
   --repo jyqin0203/AnytimeSpeak `
   --base main `
   --head codex/<short-task-name> `
   --draft `
   --title '<type>: <short description>' `
   --body-file <path-to-pr-body.md>
+```
+
+If neither the GitHub plugin connector nor `gh` is available, push the branch and report the compare URL so the repository owner can create the PR manually:
+
+```text
+https://github.com/jyqin0203/AnytimeSpeak/pull/new/codex/<short-task-name>
 ```
 
 Every PR body must include:
@@ -98,7 +113,7 @@ Every PR body must include:
 ### Verify After Creating The PR
 
 ```powershell
-& 'C:\Program Files\GitHub CLI\gh.exe' pr view --repo jyqin0203/AnytimeSpeak --web
+gh pr view --repo jyqin0203/AnytimeSpeak --web
 & 'C:\Program Files\Git\cmd\git.exe' status --short --branch
 ```
 
@@ -112,11 +127,12 @@ Also verify:
 
 ### Known Pitfalls
 
-- GitHub connector write actions may return `403 Resource not accessible by integration`; use local Git and `gh` instead.
-- `git` may be installed but missing from `PATH`; use `C:\Program Files\Git\cmd\git.exe`.
-- `gh` may be installed but missing from `PATH`; use `C:\Program Files\GitHub CLI\gh.exe`.
-- `gh pr create` may fail if `gh auth status` is not logged in.
+- Older notes in this repo assumed another computer where `C:\Program Files\GitHub CLI\gh.exe` existed. On this machine, that path does not exist.
+- Git is available at `C:\Program Files\Git\cmd\git.exe`; use that absolute path for reliable local git operations.
+- The GitHub plugin may be installed and enabled but still unavailable to an already-running Codex session. Start a new session if the GitHub connector tool does not appear.
+- If using `gh`, it must be installed, reachable from `PATH` or an explicit absolute path, and authenticated before PR creation.
 - Branches created from a local empty commit instead of `origin/main` can fail PR comparison.
+- If the current working tree has unrelated local changes, use a separate `git worktree` from `origin/main` for the PR branch instead of stashing or overwriting user work.
 
 ## PR 1: Project Guidelines and Planning Documents
 
