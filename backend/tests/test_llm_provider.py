@@ -421,3 +421,16 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     assert response.recommended_english == "I want to schedule a meeting tomorrow."
     assert "schedule a meeting" in response.why
     assert response.provider == "llm"
+
+
+def test_llm_text_cleanup_removes_em_dash_repeated_punctuation_and_limits_length():
+    import app.llm_provider as llm_provider
+
+    cleaned = llm_provider._clean_llm_text(
+        "This is natural——but too excited!!!   Please listen??", 42
+    )
+
+    assert "—" not in cleaned
+    assert "!!!" not in cleaned
+    assert "??" not in cleaned
+    assert len(cleaned) <= 45
