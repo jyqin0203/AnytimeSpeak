@@ -34,7 +34,6 @@ import {
   type HistorySessionItem,
   type SaveHistoryPayload,
 } from "./api/history";
-import { VoiceControls } from "./components/VoiceControls";
 import {
   providerBadgeText,
   providerStatusText,
@@ -1013,7 +1012,6 @@ function Practice({
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestFeedback = feedback[feedback.length - 1];
   const latestScore = latestFeedback?.score ?? null;
-  const [speechLanguage, setSpeechLanguage] = useState("zh-CN");
   const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
   const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
   const lastSpokenAiId = useRef<number | null>(null);
@@ -1022,7 +1020,7 @@ function Practice({
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
   const voiceRecorder = useVoiceRecorder();
   const speechInput = useSpeechInput({
-    lang: speechLanguage,
+    lang: "en-US",
     interimResults: true,
     continuous: true,
     onTranscriptChange: (transcript) => {
@@ -1030,6 +1028,7 @@ function Practice({
       onInput(transcript);
     },
   });
+  const isRecording = speechInput.isListening || speechInput.isRestarting;
 
   useEffect(() => {
     if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
@@ -1158,33 +1157,30 @@ function Practice({
             );
           })}
         </div>
-        <VoiceControls
-          input={speechInput}
-          output={speechOutput}
-          sampleText={latestAiText}
-          language={speechLanguage}
-          onLanguageChange={setSpeechLanguage}
-          onToggleListening={toggleVoiceInput}
-          isSending={sendStatus === "loading"}
-          recorderError={voiceRecorder.error?.message ?? null}
-        />
-        <details className="text-fallback">
-          <summary>改用文字输入</summary>
-          <form className="composer" onSubmit={onSend}>
-            <label htmlFor="practice-input">你的英文回答</label>
-            <div>
-              <input
-                id="practice-input"
-                value={input}
-                onChange={(event) => onInput(event.target.value)}
-                placeholder="例如：I finished the homepage and need help with tests."
-              />
-              <button className="primary-button" type="submit" disabled={sendStatus === "loading"}>
-                {sendStatus === "loading" ? "发送中..." : "发送"}
-              </button>
-            </div>
-          </form>
-        </details>
+        <form className="chat-composer" onSubmit={onSend}>
+          <input
+            id="practice-input"
+            className="chat-input"
+            value={input}
+            onChange={(e) => onInput(e.target.value)}
+            placeholder={isRecording ? "聆听中，再点一次停止并发送..." : "输入回答，或点击右侧麦克风说话"}
+            disabled={sendStatus === "loading"}
+            autoComplete="off"
+          />
+          <button
+            className={`mic-btn${isRecording ? " recording" : ""}`}
+            type="button"
+            onClick={toggleVoiceInput}
+            disabled={!speechInput.isSupported || sendStatus === "loading"}
+            title={isRecording ? "停止录音并发送" : "开始语音输入"}
+            aria-label={isRecording ? "停止录音并发送" : "开始语音输入"}
+          >
+            <span className="microphone-icon" aria-hidden="true"><span /></span>
+          </button>
+          <button className="primary-button" type="submit" disabled={sendStatus === "loading" || (!input.trim() && !isRecording)}>
+            {sendStatus === "loading" ? "..." : "发送"}
+          </button>
+        </form>
       </div>
 
       <aside className="feedback-panel">
