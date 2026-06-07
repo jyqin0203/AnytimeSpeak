@@ -1594,3 +1594,160 @@ dd {
     flex-direction: column;
   }
 }
+
+/* ── Polish: transitions, hover/focus/active states, micro-interactions ──── */
+
+/* Base transition for every button */
+button {
+  transition:
+    background 0.16s ease-out,
+    box-shadow 0.16s ease-out,
+    border-color 0.16s ease-out,
+    transform 0.13s ease-out,
+    opacity 0.13s ease-out;
+}
+
+/* Primary button: lift on hover, press on active */
+.primary-button:hover:not(:disabled) {
+  box-shadow: 0 20px 40px rgba(232, 106, 168, 0.42);
+  transform: translateY(-1px);
+}
+.primary-button:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 8px 18px rgba(232, 106, 168, 0.22);
+}
+
+/* Secondary button: highlight border + lift */
+.secondary-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(232, 106, 168, 0.42);
+  transform: translateY(-1px);
+}
+.secondary-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Danger button */
+.danger-button:hover:not(:disabled) {
+  background: rgba(247, 191, 216, 0.32);
+  transform: translateY(-1px);
+}
+.danger-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+/* Global keyboard focus ring: visible only for keyboard nav */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+summary:focus-visible {
+  outline: 2.5px solid rgba(232, 106, 168, 0.75);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* Brand button hover */
+.brand-button:hover {
+  opacity: 0.82;
+}
+
+/* Topbar nav buttons */
+.topbar nav button {
+  transition: color 0.14s ease-out, background 0.14s ease-out;
+}
+
+/* Profile chip */
+.profile-chip {
+  transition: background 0.15s ease-out, border-color 0.15s ease-out;
+}
+.profile-chip:hover {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(232, 106, 168, 0.38);
+}
+
+/* Scenario card: already has hover, add transition */
+.scenario-card {
+  transition: border-color 0.18s ease-out, box-shadow 0.18s ease-out, transform 0.18s ease-out;
+}
+
+/* History item card: add lift */
+.history-item-card {
+  transition: box-shadow 0.16s ease-out, transform 0.14s ease-out;
+}
+.history-item-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(158, 115, 164, 0.22);
+}
+
+/* Read-aloud button */
+.read-aloud-button {
+  transition: background 0.14s ease-out, opacity 0.14s ease-out;
+}
+.read-aloud-button:hover:not(:disabled) {
+  background: rgba(246, 168, 207, 0.28);
+}
+
+/* Chat input */
+.chat-input {
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+/* Composer / modal inputs */
+.composer input,
+.modal-card input {
+  transition: border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+
+/* Mic button: smooth hover + recording pulse animation */
+.mic-btn {
+  transition: background 0.18s ease-out, box-shadow 0.18s ease-out, transform 0.13s ease-out;
+}
+.mic-btn:hover:not(:disabled) {
+  transform: scale(1.06);
+  box-shadow: 0 10px 24px rgba(232, 106, 168, 0.42);
+}
+.mic-btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(246, 168, 207, 0.45), 0 6px 16px rgba(232, 106, 168, 0.28); }
+  60%       { box-shadow: 0 0 0 0.55rem rgba(246, 168, 207, 0.12), 0 6px 16px rgba(232, 106, 168, 0.28); }
+}
+.mic-btn.recording {
+  animation: mic-pulse 1.6s ease-in-out infinite;
+}
+
+/* Auth mode tab buttons */
+.auth-mode-row button {
+  transition: background 0.14s ease-out, color 0.14s ease-out;
+}
+
+/* Voice mode row buttons (kept for completeness if used elsewhere) */
+.voice-mode-row button {
+  transition: background 0.14s ease-out, color 0.14s ease-out, border-color 0.14s ease-out;
+}
+
+/* text-wrap: balance on headings for cleaner line breaks */
+h1, h2, h3 {
+  text-wrap: balance;
+}
+
+/* Compact button touch target: ensure minimum hit area on mobile */
+@media (max-width: 760px) {
+  .compact-button {
+    min-height: 2.75rem;
+  }
+}
+
+/* Respect reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
