@@ -250,7 +250,30 @@ Current status: still needed for final submission materials. Do not add a demo v
 - Add demo video script and recording checklist.
 - Document third-party dependencies, APIs, and AI-generated code usage.
 
+## PR 16: Doubao Streaming ASR Provider
+
+Current status: merged into `main`.
+
+- Add optional Doubao BigModel Streaming ASR through the backend `/ws/asr` relay.
+- Keep browser speech recognition and text input as fallback paths.
+- Document provider environment variables in `.env.example` and README.
+
+## Current PR: Pronunciation Assessment Fallback And XFYUN Provider
+
+Branch: `codex/pronunciation-assessment-fallback`
+
+Current status: pushed, pending merge.
+
+- Add `POST /api/pronunciation/assess` for voice-turn pronunciation scoring.
+- Keep `/api/feedback` responsible for grammar, expression, naturalness, and scenario fit.
+- Add deterministic `heuristic_mock` fallback for demos without provider credentials.
+- Add optional iFlytek/XFYUN ISE provider mode with backend-only credentials.
+- Support transcript-only JSON requests and multipart recording uploads.
+- Show a compact pronunciation assessment module in the feedback UI.
+- Save pronunciation assessment inside per-turn feedback JSON when available.
+- Fix voice-turn state handling so Doubao ASR sessions reset cleanly between turns.
+- Document provider switching and security constraints.
+
 ## Recommended Follow-Up PRs
 
-- `feat: add streaming ASR provider`
 - `docs: finalize submission materials`

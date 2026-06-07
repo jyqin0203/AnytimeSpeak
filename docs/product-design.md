@@ -22,6 +22,8 @@ The MVP is designed for a course demo: it should be stable, easy to understand, 
 - AI reply auto-play through browser speech synthesis when supported.
 - User recording replay through browser recording APIs.
 - Backend LLM provider mode with deterministic mock fallback.
+- Optional Doubao Streaming ASR through a backend WebSocket relay.
+- Pronunciation assessment for voice turns with compact score feedback, heuristic fallback, and optional iFlytek/XFYUN ISE provider.
 
 ## Current User Flow
 
@@ -33,6 +35,7 @@ The MVP is designed for a course demo: it should be stable, easy to understand, 
 6. Speak or type English input in the chat composer; mic button starts/stops voice input.
 7. Receive an AI role-play reply (sanitized text; playback may start automatically when supported).
 8. Review latest-turn feedback with recommended English, issue explanation, and score breakdown.
+8a. For voice turns, review a compact pronunciation assessment when available. Text turns show no pronunciation score.
 9. Replay the user's own recording when available.
 10. End the session.
 11. Review summary — scores show `—` while loading, then display the final values.
@@ -73,6 +76,20 @@ Current feedback includes:
 - Numeric score.
 - Score breakdown for grammar, naturalness, relevance, and clarity.
 - `provider` label showing whether the backend used LLM or mock fallback.
+
+### Pronunciation Assessment
+
+Pronunciation assessment is a separate module from grammar/expression feedback. It appears for voice turns only and stays compact so it does not interrupt the conversation loop.
+
+Current pronunciation feedback includes:
+
+- Overall pronunciation score.
+- Fluency, accuracy, and completeness scores.
+- One or two Chinese improvement tips.
+- Provider and fallback handling in the backend response.
+- Text-input no-assessment state instead of fake pronunciation scores.
+
+The backend supports local heuristic scoring for stable demos and optional iFlytek/XFYUN ISE scoring when credentials are configured. Provider failures fall back to the heuristic result.
 
 ### Post-Session Summary
 
@@ -118,6 +135,7 @@ Latest-turn feedback uses:
 ### Speech Input
 
 - Use browser `SpeechRecognition` when available.
+- Use Doubao Streaming ASR through `/ws/asr` when `ASR_PROVIDER_MODE=doubao` and credentials are configured.
 - Treat voice as the primary practice action in supported browsers.
 - Let users start and stop recognition manually.
 - Convert recognized speech into editable text before sending.
@@ -147,6 +165,7 @@ Current status:
 
 - Username/password registration and login from the topbar.
 - Completed sessions auto-saved after each practice ends (messages, feedback, summary, scores, provider label).
+- Pronunciation assessment is saved inside per-turn feedback JSON when available, so history detail can show the score without a database schema migration.
 - `练习历史` list and session detail views.
 - If save fails, the completed session remains in frontend state as a pending save; summary page shows a fallback note.
 - Passwords are stored with salted PBKDF2 hashes, never as plaintext.
@@ -154,8 +173,7 @@ Current status:
 
 ## Future Optimization
 
-- Username and password login for more durable accounts.
 - More stable history saving and retry behavior.
-- Streaming ASR or cloud speech recognition provider.
 - UI and demo polish for layout, loading states, and recording reliability.
-- More detailed pronunciation and fluency evaluation.
+- Cloud TTS provider for voice output.
+- More detailed pronunciation and fluency evaluation after the current compact scoring module is stable.
