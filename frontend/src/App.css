@@ -1011,22 +1011,30 @@ dd {
 }
 
 .coach-score {
-  display: grid;
-  gap: 0.35rem;
-  margin-bottom: 1rem;
-  padding: 1rem;
-  border-radius: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  width: fit-content;
   color: #6d3b75;
   background: linear-gradient(135deg, rgba(246, 168, 207, 0.24), rgba(188, 167, 245, 0.2));
 }
 
-.coach-score strong {
-  color: #8d3d8f;
-  font-size: 3.1rem;
-  line-height: 0.95;
+.coach-score span {
+  font-size: 0.76rem;
+  font-weight: 900;
+  color: var(--muted);
 }
 
-.coach-score p,
+.coach-score strong {
+  color: #8d3d8f;
+  font-size: 1.1rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .empty-state,
 .summary-card ul,
 .summary-hero p {

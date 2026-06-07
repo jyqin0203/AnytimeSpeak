@@ -1185,9 +1185,8 @@ function Practice({
 
       <aside className="feedback-panel">
         <div className="coach-score">
-          <span>本轮表现</span>
+          <span>本轮</span>
           <strong>{latestScore !== null ? latestScore : "—"}</strong>
-          <p>{latestScore !== null ? "反馈放在旁边累积，不打断对话主线。" : "发送第一句话后，这里会显示本轮评分。"}</p>
         </div>
         <div className="panel-title compact">
           <h2>即时反馈</h2>
