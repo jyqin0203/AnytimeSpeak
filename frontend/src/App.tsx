@@ -13,6 +13,20 @@ import {
   type Scenario,
   type SessionSummary,
 } from "./api/coaching";
+import {
+  clearStoredUser,
+  createGuestUser,
+  fetchSessionDetail,
+  fetchSessionHistory,
+  formatDateTime,
+  loadStoredUser,
+  providerLabel,
+  saveSessionHistory,
+  storeUser,
+  type GuestUser,
+  type HistorySessionDetail,
+  type HistorySessionItem,
+} from "./api/history";
 import { VoiceControls } from "./components/VoiceControls";
 import {
   providerBadgeText,
@@ -24,7 +38,7 @@ import {
 import { useSpeechInput, useSpeechOutput, useVoiceRecorder, type VoiceRecording } from "./speech";
 import "./App.css";
 
-type View = "home" | "scenarios" | "practice" | "summary";
+type View = "home" | "scenarios" | "practice" | "summary" | "history" | "history-detail";
 type AsyncState = "idle" | "loading" | "error";
 
 const features = ["场景化练习", "AI 角色对话", "语法 / 表达反馈", "课后总结评分"];
@@ -39,6 +53,7 @@ function App() {
   const [feedbackStatus, setFeedbackStatus] = useState<AsyncState>("idle");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [summary, setSummary] = useState<SessionSummary>(() => createLocalSummary([], []));
+  const [summaryProvider, setSummaryProvider] = useState<string>("local-fallback");
   const [input, setInput] = useState("");
   const [source, setSource] = useState<SourceState>("local-fallback");
   const [scenarioStatus, setScenarioStatus] = useState<AsyncState>("loading");
@@ -47,6 +62,25 @@ function App() {
   const [statusText, setStatusText] = useState("正在连接练习服务...");
   const [voiceRecordings, setVoiceRecordings] = useState<Record<number, string>>({});
   const voiceRecordingsRef = useRef<Record<number, string>>({});
+
+  // User profile state
+  const [guestUser, setGuestUser] = useState<GuestUser | null>(() => loadStoredUser());
+  const [showProfileModal, setShowProfileModal] = useState(false);
+
+  // History state
+  const [historyList, setHistoryList] = useState<HistorySessionItem[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<AsyncState>("idle");
+  const [historyDetail, setHistoryDetail] = useState<HistorySessionDetail | null>(null);
+  const [historyDetailStatus, setHistoryDetailStatus] = useState<AsyncState>("idle");
+  const [historySaveNote, setHistorySaveNote] = useState<string | null>(null);
+
+  // Snapshot of session data used for saving history after summary
+  const sessionSnapshotRef = useRef<{
+    scenario: Scenario;
+    messages: Message[];
+    feedbacks: Feedback[];
+    sessionId: string;
+  } | null>(null);
 
   useEffect(() => {
     void loadScenarios();
@@ -86,11 +120,13 @@ function App() {
     setFeedbackStatus("idle");
     setSessionId(null);
     setSummary(createLocalSummary([], []));
+    setSummaryProvider("local-fallback");
     Object.values(voiceRecordingsRef.current).forEach((url) => URL.revokeObjectURL(url));
     voiceRecordingsRef.current = {};
     setVoiceRecordings({});
     setSendStatus("idle");
     setSummaryStatus("idle");
+    setHistorySaveNote(null);
     setInput("");
     setView("practice");
     void startPracticeSession(scenario)
@@ -148,7 +184,6 @@ function App() {
         setFeedback((current) => [...current, feedbackResult.value]);
         setFeedbackStatus("idle");
       } else {
-        // Never keep showing the previous turn's feedback when this turn failed.
         setFeedbackStatus("error");
       }
 
@@ -183,19 +218,106 @@ function App() {
     const fallbackSummary = createLocalSummary(messages, feedback);
     setSummary(fallbackSummary);
     setSummaryStatus("loading");
+    setHistorySaveNote(null);
+
+    // Save a snapshot before navigating away
+    const snapshotScenario = selected;
+    const snapshotMessages = messages;
+    const snapshotFeedbacks = feedback;
+    const snapshotSessionId = sessionId ?? `local_${Date.now()}`;
+    sessionSnapshotRef.current = {
+      scenario: snapshotScenario,
+      messages: snapshotMessages,
+      feedbacks: snapshotFeedbacks,
+      sessionId: snapshotSessionId,
+    };
+
     setView("summary");
+
+    let resolvedSummary = fallbackSummary;
+    let resolvedProvider = "local-fallback";
 
     try {
       const backendSummary = await fetchSessionSummary(selected, messages);
       setSummary(backendSummary);
+      setSummaryProvider(backendSummary.provider);
       setSource(sourceFromProvider(backendSummary.provider));
       setSummaryStatus("idle");
       setStatusText(providerStatusText(backendSummary.provider, backendSummary.fallbackReason));
+      resolvedSummary = backendSummary;
+      resolvedProvider = backendSummary.provider;
     } catch {
       setSummary(fallbackSummary);
+      setSummaryProvider("local-fallback");
       setSource("local-fallback");
       setSummaryStatus("error");
       setStatusText("前端完全请求不到后端，已展示前端本地模式生成的总结。");
+    }
+
+    // Auto-save history if user is logged in
+    if (guestUser) {
+      try {
+        await saveSessionHistory({
+          userId: guestUser.userId,
+          sessionId: snapshotSessionId,
+          scenario: snapshotScenario,
+          messages: snapshotMessages,
+          feedbacks: snapshotFeedbacks,
+          summary: resolvedSummary,
+          provider: resolvedProvider,
+        });
+      } catch {
+        setHistorySaveNote("本次总结已生成，但历史记录保存失败。");
+      }
+    }
+  };
+
+  const openHistory = async () => {
+    if (!guestUser) {
+      setShowProfileModal(true);
+      return;
+    }
+    setHistoryStatus("loading");
+    setView("history");
+    try {
+      const items = await fetchSessionHistory(guestUser.userId);
+      setHistoryList(items);
+      setHistoryStatus("idle");
+    } catch {
+      setHistoryList([]);
+      setHistoryStatus("error");
+    }
+  };
+
+  const openHistoryDetail = async (sessionId: string) => {
+    setHistoryDetailStatus("loading");
+    setView("history-detail");
+    try {
+      const detail = await fetchSessionDetail(sessionId);
+      setHistoryDetail(detail);
+      setHistoryDetailStatus("idle");
+    } catch {
+      setHistoryDetail(null);
+      setHistoryDetailStatus("error");
+    }
+  };
+
+  const handleCreateProfile = async (displayName: string) => {
+    try {
+      const user = await createGuestUser(displayName);
+      storeUser(user);
+      setGuestUser(user);
+      setShowProfileModal(false);
+    } catch {
+      // Backend unavailable: create a local-only profile
+      const localUser: GuestUser = {
+        userId: `local_${Date.now()}`,
+        displayName,
+        createdAt: new Date().toISOString(),
+      };
+      storeUser(localUser);
+      setGuestUser(localUser);
+      setShowProfileModal(false);
     }
   };
 
@@ -220,7 +342,44 @@ function App() {
             开始练习
           </button>
         </nav>
+        <div className="topbar-profile">
+          <button
+            className="history-button secondary-button compact-button"
+            type="button"
+            onClick={() => void openHistory()}
+          >
+            练习历史
+          </button>
+          {guestUser ? (
+            <button
+              className="profile-chip"
+              type="button"
+              title="点击退出档案"
+              onClick={() => {
+                clearStoredUser();
+                setGuestUser(null);
+              }}
+            >
+              {guestUser.displayName}
+            </button>
+          ) : (
+            <button
+              className="secondary-button compact-button"
+              type="button"
+              onClick={() => setShowProfileModal(true)}
+            >
+              创建档案
+            </button>
+          )}
+        </div>
       </header>
+
+      {showProfileModal && (
+        <ProfileModal
+          onConfirm={(name) => void handleCreateProfile(name)}
+          onClose={() => setShowProfileModal(false)}
+        />
+      )}
 
       {view === "home" && <Home onStart={() => setView("scenarios")} source={source} statusText={statusText} />}
       {view === "scenarios" && (
@@ -261,13 +420,317 @@ function App() {
           status={summaryStatus}
           source={source}
           statusText={statusText}
+          historySaveNote={historySaveNote}
           onAgain={() => start(selected)}
           onChoose={() => setView("scenarios")}
+        />
+      )}
+      {view === "history" && (
+        <HistoryList
+          items={historyList}
+          status={historyStatus}
+          hasUser={!!guestUser}
+          displayName={guestUser?.displayName ?? ""}
+          onDetail={openHistoryDetail}
+          onBack={() => setView("home")}
+          onCreateProfile={() => setShowProfileModal(true)}
+        />
+      )}
+      {view === "history-detail" && (
+        <HistoryDetailView
+          detail={historyDetail}
+          status={historyDetailStatus}
+          onBack={() => void openHistory()}
         />
       )}
     </main>
   );
 }
+
+// ── ProfileModal ──────────────────────────────────────────────────────────────
+
+function ProfileModal({ onConfirm, onClose }: { onConfirm: (name: string) => void; onClose: () => void }) {
+  const [name, setName] = useState("");
+  const submit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const trimmed = name.trim();
+    if (trimmed) onConfirm(trimmed);
+  };
+
+  return (
+    <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="创建练习档案">
+      <div className="modal-card">
+        <h2>创建练习档案</h2>
+        <p>输入昵称即可开始记录练习历史，无需注册或密码。</p>
+        <form onSubmit={submit}>
+          <label htmlFor="profile-name">你的昵称</label>
+          <input
+            id="profile-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="例如：Jiaying"
+            maxLength={50}
+            autoFocus
+          />
+          <div className="modal-actions">
+            <button className="primary-button" type="submit" disabled={!name.trim()}>
+              确认创建
+            </button>
+            <button className="secondary-button" type="button" onClick={onClose}>
+              取消
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── HistoryList ───────────────────────────────────────────────────────────────
+
+function HistoryList({
+  items,
+  status,
+  hasUser,
+  displayName,
+  onDetail,
+  onBack,
+  onCreateProfile,
+}: {
+  items: HistorySessionItem[];
+  status: AsyncState;
+  hasUser: boolean;
+  displayName: string;
+  onDetail: (sessionId: string) => void;
+  onBack: () => void;
+  onCreateProfile: () => void;
+}) {
+  return (
+    <section className="history-page page-section">
+      <div className="history-header">
+        <div>
+          <h1>练习历史</h1>
+          {hasUser && <p className="history-user">档案：{displayName}</p>}
+        </div>
+        <button className="secondary-button" type="button" onClick={onBack}>
+          返回首页
+        </button>
+      </div>
+
+      {!hasUser && (
+        <div className="history-no-user">
+          <p>还没有练习档案。创建昵称后，练习记录将自动保存。</p>
+          <button className="primary-button" type="button" onClick={onCreateProfile}>
+            创建练习档案
+          </button>
+        </div>
+      )}
+
+      {hasUser && status === "loading" && (
+        <div className="empty-state">
+          <strong>正在加载练习历史...</strong>
+        </div>
+      )}
+
+      {hasUser && status === "error" && (
+        <div className="empty-state error">
+          <strong>历史记录加载失败</strong>
+          <p>请检查后端是否运行，或稍后再试。</p>
+        </div>
+      )}
+
+      {hasUser && status === "idle" && items.length === 0 && (
+        <div className="empty-state">
+          <strong>还没有练习记录</strong>
+          <p>完成一次练习并结束后，记录会自动保存到这里。</p>
+        </div>
+      )}
+
+      {hasUser && status === "idle" && items.length > 0 && (
+        <div className="history-list">
+          {items.map((item) => (
+            <button
+              className="history-item-card"
+              key={item.sessionId}
+              type="button"
+              onClick={() => onDetail(item.sessionId)}
+            >
+              <div className="history-item-top">
+                <strong>{item.scenarioTitle}</strong>
+                <span className={`provider-badge ${item.provider === "llm" ? "llm" : "fallback"}`}>
+                  {providerLabel(item.provider)}
+                </span>
+              </div>
+              <div className="history-item-meta">
+                <span>{formatDateTime(item.startedAt)}</span>
+                {item.overallScore !== null && (
+                  <span className="history-score">综合 {item.overallScore}</span>
+                )}
+              </div>
+              {item.summaryPreview && (
+                <p className="history-preview">{item.summaryPreview}</p>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── HistoryDetailView ─────────────────────────────────────────────────────────
+
+function HistoryDetailView({
+  detail,
+  status,
+  onBack,
+}: {
+  detail: HistorySessionDetail | null;
+  status: AsyncState;
+  onBack: () => void;
+}) {
+  if (status === "loading") {
+    return (
+      <section className="history-page page-section">
+        <div className="empty-state">
+          <strong>正在加载练习详情...</strong>
+        </div>
+      </section>
+    );
+  }
+
+  if (status === "error" || !detail) {
+    return (
+      <section className="history-page page-section">
+        <div className="empty-state error">
+          <strong>加载失败</strong>
+          <p>无法获取该条练习记录，请稍后再试。</p>
+        </div>
+        <button className="secondary-button" type="button" onClick={onBack}>
+          返回历史列表
+        </button>
+      </section>
+    );
+  }
+
+  const summary = detail.summaryJson ?? {};
+  const strengths = (summary["strengths"] as string[] | undefined) ?? [];
+  const repeatedIssues = (summary["repeated_issues"] as string[] | undefined) ?? [];
+  const betterExpressions = (summary["better_expressions"] as string[] | undefined) ?? [];
+  const scores = (summary["scores"] as Record<string, number> | undefined) ?? {};
+  const overallText = (summary["summary"] as string | undefined) ?? "";
+
+  return (
+    <section className="history-page page-section">
+      <div className="history-header">
+        <div>
+          <h1>{detail.scenarioTitle} · 练习详情</h1>
+          <p className="history-user">
+            {formatDateTime(detail.startedAt)}
+            {detail.overallScore !== null && ` · 综合 ${detail.overallScore}`}
+            <span className={`provider-badge ${detail.provider === "llm" ? "llm" : "fallback"}`} style={{ marginLeft: "0.5rem" }}>
+              {providerLabel(detail.provider)}
+            </span>
+          </p>
+        </div>
+        <button className="secondary-button" type="button" onClick={onBack}>
+          返回历史列表
+        </button>
+      </div>
+
+      {(detail.storyIntroZh || detail.storyIntroEn) && (
+        <div className="history-story">
+          <span>情境前言</span>
+          {detail.storyIntroZh && <p>{detail.storyIntroZh}</p>}
+          {detail.storyIntroEn && <p className="story-intro-en">{detail.storyIntroEn}</p>}
+        </div>
+      )}
+
+      {overallText && (
+        <div className="history-section">
+          <h2>总体评价</h2>
+          <p>{overallText}</p>
+        </div>
+      )}
+
+      {Object.keys(scores).length > 0 && (
+        <div className="history-section">
+          <h2>评分</h2>
+          <div className="score-board">
+            {Object.entries(scores).map(([label, value]) => (
+              <article className="score-row" key={label}>
+                <div>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+                <div className="score-track" aria-hidden="true">
+                  <span style={{ width: `${value}%` }} />
+                </div>
+              </article>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {detail.messages.length > 0 && (
+        <div className="history-section">
+          <h2>对话记录</h2>
+          <div className="history-messages">
+            {detail.messages.map((msg, i) => (
+              <div className={`message-bubble ${msg.role === "assistant" ? "ai" : "user"}`} key={i}>
+                <div className="message-meta">
+                  <span>{msg.role === "assistant" ? "AI" : "你"}</span>
+                </div>
+                <p>{msg.content}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {detail.feedbacks.length > 0 && (
+        <div className="history-section">
+          <h2>即时反馈</h2>
+          <div className="history-feedbacks">
+            {detail.feedbacks.map((fb, i) => (
+              <div className="feedback-card" key={i}>
+                {fb.score !== null && <div className="score-pill">{fb.score}</div>}
+                {fb.userMessage && (
+                  <div>
+                    <span>你说的是</span>
+                    <p>{fb.userMessage}</p>
+                  </div>
+                )}
+                {fb.feedbackJson && (fb.feedbackJson["issue"] as string | undefined) && (
+                  <div>
+                    <span>主要问题</span>
+                    <p>{fb.feedbackJson["issue"] as string}</p>
+                  </div>
+                )}
+                {fb.feedbackJson && (fb.feedbackJson["recommended_english"] as string | undefined) && (
+                  <div>
+                    <span>推荐英文表达</span>
+                    <p className="english-suggestion">{fb.feedbackJson["recommended_english"] as string}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {(strengths.length > 0 || repeatedIssues.length > 0 || betterExpressions.length > 0) && (
+        <div className="summary-columns">
+          {strengths.length > 0 && <SummaryList title="优势" items={strengths} />}
+          {repeatedIssues.length > 0 && <SummaryList title="常见问题" items={repeatedIssues} />}
+          {betterExpressions.length > 0 && <SummaryList title="建议复用表达" items={betterExpressions} />}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ── Existing views ────────────────────────────────────────────────────────────
 
 function Home({ onStart, source, statusText }: { onStart: () => void; source: SourceState; statusText: string }) {
   return (
@@ -693,6 +1156,7 @@ function Summary({
   status,
   source,
   statusText,
+  historySaveNote,
   onAgain,
   onChoose,
 }: {
@@ -701,6 +1165,7 @@ function Summary({
   status: AsyncState;
   source: SourceState;
   statusText: string;
+  historySaveNote: string | null;
   onAgain: () => void;
   onChoose: () => void;
 }) {
@@ -716,6 +1181,9 @@ function Summary({
           </span>
         </p>
         <StatusBanner status={status} source={source} text={statusText} />
+        {historySaveNote && (
+          <p className="history-save-note">{historySaveNote}</p>
+        )}
         <div className="summary-actions">
           <button className="primary-button" type="button" onClick={onAgain}>
             再练一次
