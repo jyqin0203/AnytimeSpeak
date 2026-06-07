@@ -177,9 +177,7 @@ LLM：
 6. 结束练习，查看课后总结与评分。
 7. 打开历史记录，查看已保存 session。
 
-Demo 视频链接：TBD
-
-录制脚本见 [docs/demo-script.md](docs/demo-script.md)。
+Demo 视频链接：https://www.bilibili.com/video/BV1iCE86cEz7/?vd_source=806d61a83aa2f1da16064999ed1b9a6b
 
 ## 第三方依赖与 API 使用说明
 
