@@ -2,6 +2,8 @@
 
 This document records the AnytimeSpeak API shape. The backend implements all coaching endpoints (`/api/health`, `/api/scenarios`, `/api/sessions`, `/api/chat`, `/api/feedback`, `/api/summary`) and the guest profile and practice history endpoints (`/api/users/*`, `/api/history/*`). All coaching endpoints support mock mode so local demos remain reproducible without private API keys.
 
+`POST /api/pronunciation/assess` adds pronunciation assessment for voice turns. It is separate from `/api/feedback`: `/api/feedback` handles grammar, expression, naturalness, and scenario fit, while pronunciation assessment handles pronunciation accuracy, fluency, completeness, and spoken delivery suggestions. Text-only turns may skip pronunciation assessment or show a no-assessment state.
+
 ## General Rules
 
 - Base path: `/api`
@@ -99,6 +101,10 @@ Backend to frontend:
 ```
 
 The backend supports the Volcano Engine BigModel ASR V3 binary frame protocol via `volcengine-audio`. New console credentials use `DOUBAO_API_KEY` plus `DOUBAO_RESOURCE_ID`; legacy console credentials can use `DOUBAO_APP_ID`, `DOUBAO_ASR_TOKEN`, and `DOUBAO_RESOURCE_ID`.
+
+ASR and pronunciation assessment are intentionally separate. Doubao ASR produces transcripts for the conversation flow. Pronunciation assessment may use the transcript plus an optional recording, but it does not replace ASR and must not expose provider credentials to the browser.
+
+Pronunciation assessment returns `provider` and `is_fallback`. `provider="heuristic_mock"` means the local transcript-based fallback produced the result. Generic API mode is enabled when `PRONUNCIATION_PROVIDER_MODE=api`, `PRONUNCIATION_API_KEY`, and `PRONUNCIATION_API_BASE_URL` are configured. iFlytek/XFYUN mode is enabled when `PRONUNCIATION_PROVIDER_MODE=xfyun`, `XFYUN_APP_ID`, `XFYUN_API_KEY`, and `XFYUN_API_SECRET` are configured. The generic `PRONUNCIATION_API_*` variables are not required for XFYUN mode. Missing configuration, timeouts, HTTP failures, WebSocket failures, and invalid API response schemas fall back to `heuristic_mock`.
 
 ## GET /api/health
 
@@ -257,6 +263,61 @@ Current status: planned. Can use mock rules before AI provider integration.
   "isMock": true
 }
 ```
+
+## POST /api/pronunciation/assess
+
+Scores pronunciation for a voice turn without replacing `/api/feedback`. Text-only turns may skip this endpoint. The endpoint accepts JSON for transcript-only fallback and `multipart/form-data` with an `audio` file for real provider assessment. The frontend converts browser recordings to mono 16 kHz PCM before sending them to the backend when possible.
+
+Current status: implemented with a backend provider interface, iFlytek/XFYUN ISE support, generic API mode placeholder, and heuristic fallback.
+
+### Request Example
+
+```json
+{
+  "session_id": "session_xxx",
+  "scenario_id": "daily_conversation",
+  "user_message": "What do you do recently?",
+  "transcript": "What do you do recently?",
+  "reference_text": "What have you been up to recently?",
+  "audio_duration_ms": 3200,
+  "recognized_language": "mixed"
+}
+```
+
+### Multipart Request Fields
+
+For real provider assessment, the frontend can send `multipart/form-data`:
+
+- `audio`: optional recording file. Browser recordings are converted to PCM 16-bit, 16 kHz, mono before upload when possible.
+- `session_id`
+- `scenario_id`
+- `user_message`
+- `transcript`
+- `reference_text`
+- `audio_duration_ms`
+- `recognized_language`
+- `provider_mode`
+
+### Response Example
+
+```json
+{
+  "provider": "heuristic_mock",
+  "pronunciation_score": 78,
+  "fluency_score": 74,
+  "accuracy_score": 80,
+  "completeness_score": 82,
+  "rhythm_score": 75,
+  "overall_score": 78,
+  "feedback_zh": "这句话整体可以听懂，但表达略不自然。询问近况时，英语里更常用现在完成时。",
+  "strengths": ["语音输入内容完整", "主要意思可以被理解"],
+  "improvement_tips": ["可以跟读推荐句一次", "注意 recently 的位置和句子节奏"],
+  "word_tips": ["recently", "been up to"],
+  "is_fallback": true
+}
+```
+
+Fallback scoring considers transcript length, Chinese-English mixing, repeated words or pause markers, incomplete endings, similarity to `reference_text`, and optional `audio_duration_ms` speaking pace. It keeps demo behavior stable without API credentials and avoids fixed identical scores for every turn.
 
 ## POST /api/summary
 

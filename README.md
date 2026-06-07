@@ -9,16 +9,18 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 - AI role-play replies based on the selected scenario.
 - Grammar correction and expression improvement suggestions.
 - Latest-turn feedback with score breakdown.
+- Pronunciation assessment with a backend API provider interface and deterministic heuristic fallback.
 - Post-session summary.
 - Quantitative scoring for grammar, expression, fluency, scenario completion, and overall performance.
-- Browser speech input, AI speech playback, user recording replay, and text fallback.
+- Browser speech input, optional Doubao Streaming ASR, AI speech playback, user recording replay, and text fallback.
 
 ## Planned Tech Stack
 
 - Frontend: React + Vite + TypeScript
 - Backend: FastAPI + Python
-- Speech input: browser `SpeechRecognition`
+- Speech input: browser `SpeechRecognition` by default; optional Doubao Streaming ASR backend relay
 - Speech playback: browser `SpeechSynthesis`
+- Pronunciation assessment: backend provider interface with mock/heuristic fallback by default; optional iFlytek/XFYUN ISE provider
 - Storage: SQLite for username/password users and practice history; backend in-memory sessions for the active coaching flow
 - AI integration: environment-variable based LLM configuration with mock mode fallback
 
@@ -26,7 +28,7 @@ AnytimeSpeak is an AI English speaking practice project for scenario-based conve
 
 The project includes a mock-first MVP practice loop: scenario selection with static story seeds, session-based role-play chat, latest-turn feedback with a `grammar`/`naturalness`/`relevance`/`clarity` score breakdown, post-session summary, scoring, browser speech input/playback, user recording replay, and text input. The UI is Chinese-first for instructions and feedback labels while keeping practice content, AI role-play replies, and recommended English expressions in English.
 
-The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching. Every chat/feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key.
+The backend keeps demo sessions in memory, calls a real LLM when `LLM_PROVIDER_MODE=llm` and credentials are configured, and otherwise falls back to deterministic mock coaching. Every chat/feedback/summary response carries a `provider` field (`"llm"` or `"mock"`) so the frontend can show which one produced it without ever exposing the API key. Doubao Streaming ASR is available through the backend `/ws/asr` relay when `ASR_PROVIDER_MODE=doubao` and credentials are configured; otherwise the frontend keeps browser speech recognition and text input as fallbacks. Pronunciation assessment is available at `/api/pronunciation/assess`; when iFlytek/XFYUN or a generic pronunciation API is not configured, or when the provider fails, the backend returns a stable `heuristic_mock` result based on transcript quality and the recommended English reference.
 
 Username/password auth and practice history are supported. Users can register or log in from the topbar, then open `练习历史` to review saved sessions. Passwords are stored with salted PBKDF2 hashes, never as plaintext. The backend stores users, session metadata, messages, per-turn feedback, and post-session summaries in a local SQLite database (`backend/data/anytimespeak.db`). After each practice session the frontend automatically saves the record; users can log out, log back in, and still see their history. If saving fails, the completed session remains in the current frontend state as a pending save and the summary page shows a fallback note.
 
@@ -133,6 +135,19 @@ New console credentials use `DOUBAO_API_KEY` plus `DOUBAO_RESOURCE_ID`. Legacy c
 
 When enabled, the frontend records microphone audio as PCM 16-bit, 16 kHz, mono and streams it to the backend `/ws/asr` relay. The backend connects to Doubao over WebSocket, sends the required binary ASR frames, and relays `partial` / `final` transcript events back to the browser. Missing or invalid Doubao configuration falls back to browser speech recognition or text input.
 
+### Pronunciation Assessment
+
+Pronunciation assessment is backend-only and mock-first by default:
+
+- `PRONUNCIATION_PROVIDER_MODE=mock` or unset: use local heuristic fallback.
+- `PRONUNCIATION_PROVIDER_MODE=api` with `PRONUNCIATION_API_KEY` and `PRONUNCIATION_API_BASE_URL`: attempt a generic backend-only pronunciation API call.
+- `PRONUNCIATION_PROVIDER_MODE=xfyun` with `XFYUN_APP_ID`, `XFYUN_API_KEY`, and `XFYUN_API_SECRET`: call iFlytek/XFYUN streaming pronunciation assessment from the backend. Browser recordings are converted to mono 16 kHz PCM before upload.
+- `XFYUN_ISE_BASE_URL`, `XFYUN_ISE_LANGUAGE`, `XFYUN_ISE_CATEGORY`, and `XFYUN_ISE_AUDIO_FORMAT` are optional overrides. The defaults target English sentence reading assessment.
+- `PRONUNCIATION_API_KEY` / `PRONUNCIATION_API_BASE_URL` are only for generic `api` mode. They are not needed for `xfyun` mode.
+- `PRONUNCIATION_MODEL` is optional and only used by providers that require a model name.
+
+Missing configuration, timeouts, HTTP failures, or invalid API responses fall back to `heuristic_mock`. Pronunciation secrets are never sent to the frontend.
+
 ## Demo Video
 
 Demo video link: TBD
@@ -144,22 +159,22 @@ Related preparation docs:
 - API contract: `docs/api-contract.md`
 - Submission guide: `docs/submission-guide.md`
 
-## Future Extension: End-to-End Voice AI Model
+## Voice Provider Architecture
 
-The current version supports Doubao (ByteDance) Streaming ASR for real-time Chinese-English mixed speech recognition as an optional backend provider. The architecture is designed so that a full end-to-end voice AI pipeline can be added without restructuring existing code:
+The current version supports optional cloud speech providers while keeping the local demo path reproducible without private credentials:
 
-- **Voice input (ASR)**: Real-time speech recognition via Doubao BigModel Streaming ASR WebSocket API, capturing PCM audio in the browser and streaming transcripts back through the backend relay (`/ws/asr`). Currently implemented as an optional provider (set `ASR_PROVIDER_MODE=doubao`).
+- **Voice input (ASR)**: Real-time speech recognition via Doubao BigModel Streaming ASR WebSocket API, capturing PCM audio in the browser and streaming transcripts back through the backend relay (`/ws/asr`). Enable it with `ASR_PROVIDER_MODE=doubao`.
 - **Voice output (TTS)**: Cloud TTS services (e.g., Doubao TTS, Azure Cognitive Services TTS) can replace or supplement the current browser `SpeechSynthesis` by implementing the existing `SpeechOutputProvider` interface.
-- **Pronunciation assessment**: A `PronunciationAssessmentProvider` interface is already defined in `frontend/src/speech/types.ts`. Cloud pronunciation scoring (e.g., Azure Pronunciation Assessment) can be plugged in without changing the practice flow.
-- **Full end-to-end pipeline**: Combining Doubao ASR → LLM coaching → Doubao TTS would create a fully cloud-powered voice conversation loop. This is a planned direction but is **not implemented in the current version** to keep the MVP stable and reproducible without mandatory cloud credentials.
+- **Pronunciation assessment**: `/api/pronunciation/assess` supports transcript-only heuristic scoring and optional real provider scoring. Enable iFlytek/XFYUN ISE with `PRONUNCIATION_PROVIDER_MODE=xfyun`.
+- **Full end-to-end pipeline**: Combining Doubao ASR, LLM coaching, pronunciation assessment, and cloud TTS would create a fuller cloud-powered voice loop. Cloud TTS remains a future extension so the MVP stays stable without mandatory cloud credentials.
 
-See `frontend/src/speech/types.ts` for the provider interfaces and `backend/app/asr_provider.py` for the Doubao ASR integration point.
+See `frontend/src/speech/types.ts` for frontend speech interfaces, `backend/app/asr_provider.py` for the Doubao ASR integration point, and `backend/app/pronunciation_provider.py` for pronunciation provider switching.
 
 ## Originality and Third-Party Dependencies
 
-- Original project code: project scaffold, backend health endpoint, frontend MVP flow, backend coaching endpoints, Doubao ASR provider integration, and documentation are maintained in this repository.
-- Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, HTTPX, websockets, and volcengine-audio.
-- AI APIs or AI-generated code usage: optional LLM provider calls and optional Doubao Streaming ASR are configured through environment variables; mock mode and browser fallback remain the defaults for reproducible demos. Environment variable placeholders are listed in `.env.example`.
+- Original project code: project scaffold, backend health endpoint, frontend MVP flow, backend coaching endpoints, Doubao ASR provider integration, pronunciation assessment provider integration, and documentation are maintained in this repository.
+- Third-party libraries and frameworks: React, Vite, TypeScript, FastAPI, Uvicorn, Pytest, HTTPX, python-multipart, websockets, and volcengine-audio.
+- AI APIs or AI-generated code usage: optional LLM provider calls, optional Doubao Streaming ASR, and optional iFlytek/XFYUN pronunciation assessment are configured through environment variables; mock mode and browser/text fallback remain the defaults for reproducible demos. Environment variable placeholders are listed in `.env.example`.
 - API keys, private credentials, and unauthorized assets must not be committed.
 
 ## Development Plan
@@ -170,6 +185,7 @@ Near-term PRs:
 2. ~~Practice layout and UI/UX improvements~~ — merged.
 3. ~~Username/password login and practice history~~ — merged.
 4. ~~Doubao Streaming ASR provider~~ — merged.
-5. Final submission materials.
+5. Pronunciation assessment fallback and optional XFYUN provider.
+6. Final submission materials.
 
 See `docs/pr-plan.md` for the detailed PR roadmap.

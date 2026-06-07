@@ -92,6 +92,35 @@ class FeedbackResponse(BaseModel):
     code_switching_tip: str | None = None
 
 
+class PronunciationAssessmentRequest(BaseModel):
+    session_id: str | None = None
+    scenario_id: str
+    user_message: str | None = None
+    transcript: str | None = None
+    audio_url: str | None = None
+    audio_base64: str | None = None
+    audio_format: str | None = None
+    audio_duration_ms: int | None = Field(default=None, ge=0)
+    recognized_language: str | None = None
+    reference_text: str | None = None
+    provider_mode: str | None = None
+
+
+class PronunciationAssessmentResponse(BaseModel):
+    provider: str
+    pronunciation_score: int = Field(ge=0, le=100)
+    fluency_score: int = Field(ge=0, le=100)
+    accuracy_score: int = Field(ge=0, le=100)
+    completeness_score: int = Field(ge=0, le=100)
+    rhythm_score: int | None = Field(default=None, ge=0, le=100)
+    overall_score: int = Field(ge=0, le=100)
+    feedback_zh: str
+    strengths: list[str] = Field(default_factory=list)
+    improvement_tips: list[str] = Field(default_factory=list)
+    word_tips: list[str] = Field(default_factory=list)
+    is_fallback: bool
+
+
 class ChatResponse(BaseModel):
     session_id: str
     scenario_id: str

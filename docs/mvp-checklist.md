@@ -51,6 +51,9 @@ Status labels:
 - [x] Done: `provider` distinguishes `"llm"` from backend `"mock"` results.
 - [x] Done: `fallback_reason` can explain backend mock fallback without exposing secrets.
 - [x] Done: Frontend local fallback is separate from backend mock fallback.
+- [x] Done: Pronunciation assessment has a backend API provider interface with safe heuristic fallback.
+- [x] Done: Pronunciation assessment supports optional iFlytek/XFYUN ISE real provider mode.
+- [x] Done: Pronunciation provider falls back to `heuristic_mock` when configuration is missing or the provider fails.
 - [ ] Pending verification: Provider badges/status text are legible in the final demo.
 - [ ] Pending verification: LLM provider path works when valid credentials are configured.
 - [x] Done: Mock fallback keeps the demo reproducible without API keys.
@@ -58,13 +61,18 @@ Status labels:
 ## Voice Features
 
 - [x] Done: Speech input uses browser `SpeechRecognition` where supported.
+- [x] Done: Optional Doubao Streaming ASR works through the backend `/ws/asr` relay when configured.
 - [x] Done: Text input still works when speech features fail or are unavailable.
 - [x] Done: Speech playback uses browser `SpeechSynthesis` where supported.
 - [x] Done: AI reply auto-play is supported where browser playback works.
 - [x] Done: User recording replay exists through browser recording support.
+- [x] Done: Voice turns can show pronunciation assessment from transcript-based fallback.
+- [x] Done: Voice turns can upload the browser recording for real pronunciation assessment when available.
+- [x] Done: Text turns do not show fake pronunciation scores.
 - [ ] Pending verification: Speech recognition works reliably in the recording browser.
 - [ ] Pending verification: AI auto-play works reliably in the recording browser.
 - [ ] Pending verification: User recording replay works reliably in the recording browser.
+- [ ] Pending verification: XFYUN pronunciation provider works reliably in the recording browser with valid local credentials.
 
 ## Feedback And Summary
 
@@ -72,6 +80,7 @@ Status labels:
 - [x] Done: Feedback includes recommended English.
 - [x] Done: Feedback includes issue and explanation fields.
 - [x] Done: Feedback includes score breakdown for grammar, naturalness, relevance, and clarity.
+- [x] Done: Voice-turn feedback can include pronunciation, fluency, accuracy, completeness, and overall pronunciation scores.
 - [x] Done: Post-session summary includes overall performance.
 - [x] Done: Post-session summary includes key strengths.
 - [x] Done: Post-session summary includes repeated issues.
@@ -86,6 +95,7 @@ Status labels:
 - [x] Done: Username/password registration and login.
 - [x] Done: SQLite Practice History API and UI.
 - [x] Done: Auto-save completed sessions to history.
+- [x] Done: Pronunciation assessment is saved inside per-turn feedback JSON when available.
 - [x] Done: History list and session detail review (`练习历史`).
 - [x] Done: SQLite runtime database files are ignored by `.gitignore`.
 - [ ] Pending verification: Verify profile/history save and retry behavior before the final demo recording.
@@ -97,6 +107,7 @@ Status labels:
 - [x] Done: README includes backend setup instructions.
 - [x] Done: README documents mock mode and how to run without API keys.
 - [x] Done: README lists third-party libraries, frameworks, APIs, and AI-generated code usage.
+- [x] Done: README documents Doubao ASR and XFYUN pronunciation provider environment variables.
 - [x] Done: README includes links to demo documentation.
 - [ ] Pending verification: README status matches the exact branch used for final submission.
 - [ ] Pending verification: README demo video link is added only after a real video link exists.

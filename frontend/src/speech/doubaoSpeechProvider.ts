@@ -60,6 +60,13 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
     let disposed = false;
     let endSent = false;
     let finalAccum = "";
+    let ended = false;
+
+    const notifyEnd = () => {
+      if (ended) return;
+      ended = true;
+      callbacks.onEnd?.();
+    };
 
     const cleanupAudio = () => {
       try {
@@ -199,10 +206,10 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
         const isFinal = data.type === "final";
 
         if (isFinal) {
-          finalAccum = finalAccum ? `${finalAccum} ${text}` : text;
+          finalAccum = mergeTranscript(finalAccum, text);
         }
 
-        const displayTranscript = isFinal ? finalAccum : (finalAccum ? `${finalAccum} ${text}` : text);
+        const displayTranscript = isFinal ? finalAccum : mergeTranscript(finalAccum, text);
 
         const result: SpeechRecognitionResult = {
           transcript: displayTranscript,
@@ -228,21 +235,23 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
 
       ws.onclose = () => {
         cleanupAudio();
-        if (!disposed) {
-          callbacks.onEnd?.();
-        }
+        notifyEnd();
       };
     };
 
     return {
       start: () => {
         disposed = false;
+        ended = false;
+        endSent = false;
         finalAccum = "";
         void initSession();
       },
       stop: () => {
+        disposed = true;
         cleanupAudio();
-        sendEnd();
+        cleanupWs();
+        notifyEnd();
       },
       abort: () => {
         disposed = true;
@@ -255,3 +264,20 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
     };
   },
 };
+
+function mergeTranscript(current: string, incoming: string): string {
+  const left = current.trim();
+  const right = incoming.trim();
+  if (!left) return right;
+  if (!right) return left;
+  if (left === right || left.endsWith(right)) return left;
+  if (right.startsWith(left)) return right;
+
+  const maxOverlap = Math.min(left.length, right.length);
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (left.slice(-size) === right.slice(0, size)) {
+      return `${left}${right.slice(size)}`.trim();
+    }
+  }
+  return `${left} ${right}`.trim();
+}

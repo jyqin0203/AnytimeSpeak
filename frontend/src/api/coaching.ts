@@ -1,5 +1,11 @@
 export type Sender = "ai" | "user";
 
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
+  }
+}
+
 export type Scenario = {
   id: string;
   scenarioId: string;
@@ -44,6 +50,22 @@ export type Feedback = {
   scoreBreakdown: FeedbackScoreBreakdown;
   provider: string;
   fallbackReason?: string | null;
+  pronunciation?: PronunciationAssessment | null;
+  pronunciationInputMode?: "voice" | "text";
+};
+export type PronunciationAssessment = {
+  provider: string;
+  pronunciationScore: number;
+  fluencyScore: number;
+  accuracyScore: number;
+  completenessScore: number;
+  rhythmScore?: number | null;
+  overallScore: number;
+  feedbackZh: string;
+  strengths: string[];
+  improvementTips: string[];
+  wordTips: string[];
+  isFallback: boolean;
 };
 export type ScoreBreakdown = Record<"语法" | "表达" | "流畅" | "完成度" | "综合", number>;
 export type SessionSummary = {
@@ -105,6 +127,20 @@ type ApiFeedback = {
   fallback_reason?: string | null;
 };
 type ApiChatResponse = { reply: ApiChatMessage; provider: string; fallback_reason?: string | null; quick_feedback?: ApiFeedback };
+type ApiPronunciationAssessment = {
+  provider: string;
+  pronunciation_score: number;
+  fluency_score: number;
+  accuracy_score: number;
+  completeness_score: number;
+  rhythm_score?: number | null;
+  overall_score: number;
+  feedback_zh: string;
+  strengths: string[];
+  improvement_tips: string[];
+  word_tips: string[];
+  is_fallback: boolean;
+};
 type ApiSummaryResponse = {
   summary: string;
   strengths: string[];
@@ -134,6 +170,7 @@ const REQUEST_TIMEOUTS_MS: Record<string, number> = {
   "/api/sessions": 10000,
   "/api/chat": 120000,
   "/api/feedback": 120000,
+  "/api/pronunciation/assess": 25000,
   "/api/summary": 150000,
 };
 
@@ -377,6 +414,126 @@ export async function fetchTurnFeedback(
   };
 }
 
+export async function assessPronunciation({
+  scenario,
+  sessionId,
+  userMessage,
+  transcript,
+  referenceText,
+  audioDurationMs,
+  recognizedLanguage,
+  audio,
+}: {
+  scenario: Scenario;
+  sessionId: string | null;
+  userMessage: string;
+  transcript: string;
+  referenceText?: string | null;
+  audioDurationMs?: number;
+  recognizedLanguage?: string;
+  audio?: Blob | null;
+}): Promise<PronunciationAssessment> {
+  if (audio) {
+    const form = new FormData();
+    form.append("session_id", sessionId ?? "");
+    form.append("scenario_id", scenario.id);
+    form.append("user_message", userMessage);
+    form.append("transcript", transcript);
+    form.append("reference_text", referenceText ?? userMessage);
+    if (audioDurationMs !== undefined) form.append("audio_duration_ms", String(audioDurationMs));
+    if (recognizedLanguage) form.append("recognized_language", recognizedLanguage);
+    try {
+      const pcm = await toMono16kPcm(audio);
+      form.append("audio_format", "audio/L16;rate=16000");
+      form.append("audio", new Blob([pcm], { type: "audio/L16;rate=16000" }), "recording.pcm");
+    } catch {
+      form.append("audio_format", audio.type || "audio/webm");
+      form.append("audio", audio, "recording.webm");
+    }
+    const response = await request<ApiPronunciationAssessment>("/api/pronunciation/assess", {
+      method: "POST",
+      body: form,
+    });
+    return fromApiPronunciationAssessment(response);
+  }
+
+  const response = await request<ApiPronunciationAssessment>("/api/pronunciation/assess", {
+    method: "POST",
+    body: JSON.stringify({
+      session_id: sessionId,
+      scenario_id: scenario.id,
+      user_message: userMessage,
+      transcript,
+      reference_text: referenceText ?? userMessage,
+      audio_duration_ms: audioDurationMs,
+      recognized_language: recognizedLanguage,
+    }),
+  });
+
+  return fromApiPronunciationAssessment(response);
+}
+
+function fromApiPronunciationAssessment(response: ApiPronunciationAssessment): PronunciationAssessment {
+  return {
+    provider: response.provider,
+    pronunciationScore: response.pronunciation_score,
+    fluencyScore: response.fluency_score,
+    accuracyScore: response.accuracy_score,
+    completenessScore: response.completeness_score,
+    rhythmScore: response.rhythm_score ?? null,
+    overallScore: response.overall_score,
+    feedbackZh: sanitizeAiText(response.feedback_zh),
+    strengths: response.strengths.map(sanitizeAiText),
+    improvementTips: response.improvement_tips.map(sanitizeAiText),
+    wordTips: response.word_tips.map(sanitizeAiText),
+    isFallback: response.is_fallback,
+  };
+}
+
+async function toMono16kPcm(audio: Blob): Promise<ArrayBuffer> {
+  const AudioContextCtor = window.AudioContext ?? window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    throw new Error("AudioContext is not supported.");
+  }
+  const audioContext = new AudioContextCtor();
+  try {
+    const sourceBuffer = await audio.arrayBuffer();
+    const decoded = await audioContext.decodeAudioData(sourceBuffer.slice(0));
+    const samples = resampleTo16kMono(decoded);
+    return floatTo16BitPcm(samples);
+  } finally {
+    void audioContext.close();
+  }
+}
+
+function resampleTo16kMono(audioBuffer: AudioBuffer): Float32Array {
+  const input = audioBuffer.getChannelData(0);
+  const sourceRate = audioBuffer.sampleRate;
+  const targetRate = 16000;
+  if (sourceRate === targetRate) return input;
+  const ratio = sourceRate / targetRate;
+  const outputLength = Math.round(input.length / ratio);
+  const output = new Float32Array(outputLength);
+  for (let i = 0; i < outputLength; i += 1) {
+    const position = i * ratio;
+    const left = Math.floor(position);
+    const right = Math.min(input.length - 1, left + 1);
+    const weight = position - left;
+    output[i] = input[left] * (1 - weight) + input[right] * weight;
+  }
+  return output;
+}
+
+function floatTo16BitPcm(samples: Float32Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(samples.length * 2);
+  const view = new DataView(buffer);
+  for (let i = 0; i < samples.length; i += 1) {
+    const sample = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(i * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+  }
+  return buffer;
+}
+
 export async function fetchSessionSummary(scenario: Scenario, messages: Message[]): Promise<SessionSummary> {
   const response = await request<ApiSummaryResponse>("/api/summary", {
     method: "POST",
@@ -489,7 +646,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       response = await fetch(url, {
         ...init,
-        headers: { "Content-Type": "application/json", ...init?.headers },
+        headers: init?.body instanceof FormData ? init?.headers : { "Content-Type": "application/json", ...init?.headers },
         signal: controller.signal,
       });
     } catch {

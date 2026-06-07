@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
+  assessPronunciation,
   createLocalReply,
   createLocalSummary,
   fetchScenarios,
@@ -10,6 +11,7 @@ import {
   startPracticeSession,
   type Feedback,
   type Message,
+  type PronunciationAssessment,
   type Scenario,
   type SessionSummary,
 } from "./api/coaching";
@@ -190,7 +192,7 @@ function App() {
   };
 
   const sendText = useCallback(
-    async (rawText: string, recording?: VoiceRecording | null) => {
+    async (rawText: string, recording?: VoiceRecording | null, inputMode: "text" | "voice" = "text") => {
       const text = rawText.trim();
       if (!text || sendStatus === "loading") return;
 
@@ -221,8 +223,36 @@ function App() {
       setMessages([...nextMessages, reply]);
 
       if (feedbackResult.status === "fulfilled") {
-        setFeedback((current) => [...current, feedbackResult.value]);
+        const feedbackForTurn: Feedback = {
+          ...feedbackResult.value,
+          pronunciationInputMode: inputMode,
+        };
+        setFeedback((current) => [...current, feedbackForTurn]);
         setFeedbackStatus("idle");
+        if (inputMode === "voice") {
+          void assessPronunciation({
+            scenario: selected,
+            sessionId,
+            userMessage: userMessage.text,
+            transcript: userMessage.text,
+            referenceText: feedbackResult.value.recommendedEnglish,
+            audioDurationMs: recording?.durationMs,
+            recognizedLanguage: "en-US",
+            audio: recording?.blob ?? null,
+          })
+            .then((pronunciation) => {
+              setFeedback((current) =>
+                current.map((item) => (item.id === userMessage.id ? { ...item, pronunciation } : item)),
+              );
+            })
+            .catch(() => {
+              setFeedback((current) =>
+                current.map((item) =>
+                  item.id === userMessage.id ? { ...item, pronunciation: null, pronunciationInputMode: "voice" } : item,
+                ),
+              );
+            });
+        }
       } else {
         setFeedbackStatus("error");
       }
@@ -246,12 +276,12 @@ function App() {
 
   const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void sendText(input);
+    void sendText(input, null, "text");
   };
 
   const submitVoiceText = (text: string, recording?: VoiceRecording | null) => {
     if (!text || sendStatus === "loading") return;
-    void sendText(text, recording);
+    void sendText(text, recording, "voice");
   };
 
   const trySaveHistory = async (user: AuthUser, payload: Omit<SaveHistoryPayload, "userId">) => {
@@ -1095,6 +1125,7 @@ function Practice({
 
     latestTranscriptRef.current = "";
     speechInput.resetTranscript();
+    onInput("");
     void voiceRecorder.startRecording().finally(() => {
       speechInput.startListening();
     });
@@ -1298,12 +1329,71 @@ function Practice({
                     ))}
                   </div>
                 </div>
+                <PronunciationMiniPanel feedback={latestFeedback} />
               </article>
             )}
           </div>
         )}
       </aside>
     </section>
+  );
+}
+
+function PronunciationMiniPanel({ feedback }: { feedback: Feedback }) {
+  if (feedback.pronunciationInputMode === "text") {
+    return (
+      <div className="pronunciation-mini muted">
+        <div className="pronunciation-mini-head">
+          <span>发音测评</span>
+          <strong>文本</strong>
+        </div>
+        <p>文本输入暂无发音测评。</p>
+      </div>
+    );
+  }
+
+  if (feedback.pronunciationInputMode === "voice" && feedback.pronunciation === undefined) {
+    return (
+      <div className="pronunciation-mini">
+        <div className="pronunciation-mini-head">
+          <span>发音测评</span>
+          <strong>...</strong>
+        </div>
+        <p>正在分析发音...</p>
+      </div>
+    );
+  }
+
+  if (feedback.pronunciationInputMode === "voice" && feedback.pronunciation === null) {
+    return (
+      <div className="pronunciation-mini muted">
+        <div className="pronunciation-mini-head">
+          <span>发音测评</span>
+          <strong>--</strong>
+        </div>
+        <p>本轮发音测评暂时不可用。</p>
+      </div>
+    );
+  }
+
+  if (!feedback.pronunciation) return null;
+  return <PronunciationSummary assessment={feedback.pronunciation} />;
+}
+
+function PronunciationSummary({ assessment }: { assessment: PronunciationAssessment }) {
+  return (
+    <div className="pronunciation-mini">
+      <div className="pronunciation-mini-head">
+        <span>发音测评</span>
+        <strong>{assessment.overallScore}</strong>
+      </div>
+      <div className="pronunciation-score-row">
+        <span>流利度 {assessment.fluencyScore}</span>
+        <span>准确度 {assessment.accuracyScore}</span>
+        <span>完整度 {assessment.completenessScore}</span>
+      </div>
+      <p>{assessment.improvementTips[0] ?? assessment.feedbackZh}</p>
+    </div>
   );
 }
 
