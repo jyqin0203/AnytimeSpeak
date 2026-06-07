@@ -61,6 +61,7 @@ Expected response:
 
 Copy `.env.example` to `.env` for local provider configuration when LLM integration is added later. Do not commit `.env` or real API keys.
 The backend automatically loads provider variables from `.env` in the project root or `backend/.env`, while shell environment variables still take priority.
+Real provider mode requires `LLM_PROVIDER_MODE=llm`, an `LLM_API_KEY` or `OPENAI_API_KEY`, plus explicit `LLM_BASE_URL` and `LLM_MODEL` values. Missing configuration falls back to mock mode with a safe reason code.
 
 ## Demo Video
 

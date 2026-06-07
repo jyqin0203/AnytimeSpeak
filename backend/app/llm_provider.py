@@ -24,11 +24,10 @@ from app.schemas import (
 )
 
 
-LLM_TIMEOUT_SECONDS = 20.0
-DEFAULT_LLM_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
-DEFAULT_LLM_MODEL = "qwen-plus"
+LLM_TIMEOUT_SECONDS = 90.0
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
+logger.setLevel(logging.INFO)
 
 
 class LLMResponseParseError(ValueError):
@@ -50,8 +49,23 @@ def _load_dotenv_files() -> None:
             load_dotenv(path, override=False)
 
 
-def _log_llm_attempt(operation: str) -> None:
-    logger.info("llm_provider: provider_mode=llm, attempting %s via LLM provider", operation)
+def _log_provider_state(
+    operation: str,
+    provider_result: str,
+    fallback_reason: str | None = None,
+) -> None:
+    log = logger.warning if fallback_reason else logger.info
+    log(
+        "llm_provider: request_operation=%s provider_result=%s fallback_reason=%s "
+        "provider_mode=%s api_key_present=%s base_url_present=%s model_present=%s",
+        operation,
+        provider_result,
+        fallback_reason or "none",
+        os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower(),
+        bool(_llm_api_key()),
+        bool(_llm_base_url()),
+        bool(_llm_model()),
+    )
 
 
 def _log_fallback(operation: str, error: Exception) -> None:
@@ -64,38 +78,27 @@ def _log_fallback(operation: str, error: Exception) -> None:
     )
 
 
-def _log_fallback_reason(operation: str, reason: str) -> None:
-    logger.warning(
-        "llm_provider: %s fallback reason=%s provider_mode=%s api_key_present=%s base_url_present=%s model_present=%s",
-        operation,
-        reason,
-        os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower(),
-        bool(_llm_api_key()),
-        bool(_llm_base_url()),
-        bool(_llm_model()),
-    )
-
-
 def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
     config_reason = _llm_config_fallback_reason()
     if config_reason:
         return _mock_chat_reply(request, config_reason)
 
-    _log_llm_attempt("chat reply")
     try:
-        data = _json_from_llm(_request_chat_completion(_chat_prompt(request)))
+        data = _json_from_llm(_request_chat_completion(_chat_prompt(request)), "chat")
         quick_feedback = _feedback_from_data(data.get("quick_feedback", {}))
         quick_feedback.provider = "llm"
         quick_feedback.fallback_reason = None
-        return ChatResponse(
+        response = ChatResponse(
             session_id=request.session_id or "llm-session",
             scenario_id=request.scenario_id,
             reply=_chat_message_from_data(data.get("reply")),
             quick_feedback=quick_feedback,
             provider="llm",
         )
+        _log_provider_state("chat", "llm")
+        return response
     except Exception as exc:
-        _log_fallback("chat reply", exc)
+        _log_fallback("chat", exc)
         return _mock_chat_reply(request, _fallback_reason(exc))
 
 
@@ -104,12 +107,12 @@ def create_feedback_with_fallback(request: FeedbackRequest) -> FeedbackResponse:
     if config_reason:
         return _mock_feedback(request, config_reason)
 
-    _log_llm_attempt("feedback")
     try:
-        data = _json_from_llm(_request_chat_completion(_feedback_prompt(request)))
+        data = _json_from_llm(_request_chat_completion(_feedback_prompt(request)), "feedback")
         feedback = _feedback_from_data(data)
         feedback.provider = "llm"
         feedback.fallback_reason = None
+        _log_provider_state("feedback", "llm")
         return feedback
     except Exception as exc:
         _log_fallback("feedback", exc)
@@ -121,11 +124,10 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
     if config_reason:
         return _mock_summary(request, config_reason)
 
-    _log_llm_attempt("session summary")
     try:
-        data = _json_from_llm(_request_chat_completion(_summary_prompt(request)))
+        data = _json_from_llm(_request_chat_completion(_summary_prompt(request)), "summary")
         scores = data.get("scores", {})
-        return SummaryResponse(
+        response = SummaryResponse(
             scenario_id=request.scenario_id,
             summary=str(data["summary"]),
             strengths=_string_list(data["strengths"]),
@@ -143,8 +145,10 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
             ),
             provider="llm",
         )
+        _log_provider_state("summary", "llm")
+        return response
     except Exception as exc:
-        _log_fallback("session summary", exc)
+        _log_fallback("summary", exc)
         return _mock_summary(request, _fallback_reason(exc))
 
 
@@ -154,7 +158,7 @@ def _mock_chat_reply(request: ChatRequest, reason: str) -> ChatResponse:
     response.fallback_reason = reason
     response.quick_feedback.provider = "mock"
     response.quick_feedback.fallback_reason = reason
-    _log_fallback_reason("chat reply", reason)
+    _log_provider_state("chat", "mock", reason)
     return response
 
 
@@ -162,7 +166,7 @@ def _mock_feedback(request: FeedbackRequest, reason: str) -> FeedbackResponse:
     response = mock_service.create_feedback(request)
     response.provider = "mock"
     response.fallback_reason = reason
-    _log_fallback_reason("feedback", reason)
+    _log_provider_state("feedback", "mock", reason)
     return response
 
 
@@ -170,7 +174,7 @@ def _mock_summary(request: SummaryRequest, reason: str) -> SummaryResponse:
     response = mock_service.create_summary(request)
     response.provider = "mock"
     response.fallback_reason = reason
-    _log_fallback_reason("session summary", reason)
+    _log_provider_state("summary", "mock", reason)
     return response
 
 
@@ -220,11 +224,11 @@ def _llm_api_key() -> str:
 
 
 def _llm_base_url() -> str:
-    return os.getenv("LLM_BASE_URL", "").strip() or DEFAULT_LLM_BASE_URL
+    return os.getenv("LLM_BASE_URL", "").strip()
 
 
 def _llm_model() -> str:
-    return os.getenv("LLM_MODEL", "").strip() or DEFAULT_LLM_MODEL
+    return os.getenv("LLM_MODEL", "").strip()
 
 
 def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
@@ -363,7 +367,7 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
     ]
 
 
-def _json_from_llm(content: str) -> dict[str, Any]:
+def _json_from_llm(content: str, operation: str) -> dict[str, Any]:
     candidates = [content, *_code_fence_contents(content)]
     start = content.find("{")
     end = content.rfind("}")
@@ -382,7 +386,11 @@ def _json_from_llm(content: str) -> dict[str, Any]:
             raise LLMResponseParseError("LLM response must be a JSON object.")
         return parsed
 
-    logger.warning("llm_provider: parse_failed response_length=%s", len(content))
+    logger.warning(
+        "llm_provider: parse_failed operation=%s response_length=%s",
+        operation,
+        len(content),
+    )
     raise LLMResponseParseError("LLM response JSON parsing failed.") from last_error
 
 

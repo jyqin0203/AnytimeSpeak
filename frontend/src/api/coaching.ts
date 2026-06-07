@@ -122,19 +122,19 @@ type ApiSummaryResponse = {
 };
 
 const API_BASE_URL = normalizeApiBaseUrl(import.meta.env.VITE_API_BASE_URL);
-// The backend gives the LLM provider up to 20s before falling back to mock
+// The backend gives the LLM provider up to 90s before falling back to mock
 // (see backend/app/llm_provider.py LLM_TIMEOUT_SECONDS). A real LLM-backed
 // /api/chat, /api/feedback, or /api/summary call regularly takes 8-15s, so the
-// frontend timeout must stay comfortably above the backend's own ceiling —
+// frontend timeout must stay above the backend's own ceiling —
 // otherwise every real reply gets aborted client-side and treated as a backend
 // failure, even though the backend would have answered a few seconds later.
 const REQUEST_TIMEOUTS_MS: Record<string, number> = {
   "/api/health": 5000,
   "/api/scenarios": 10000,
   "/api/sessions": 10000,
-  "/api/chat": 35000,
-  "/api/feedback": 35000,
-  "/api/summary": 45000,
+  "/api/chat": 120000,
+  "/api/feedback": 120000,
+  "/api/summary": 150000,
 };
 
 export const localScenarios: Scenario[] = [

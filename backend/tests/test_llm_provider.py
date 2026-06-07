@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from app.schemas import ChatMessage, ChatRequest, FeedbackRequest, SummaryRequest
@@ -193,46 +195,48 @@ def test_llm_provider_loads_project_dotenv_without_printing_secret(
     assert captured_headers["Authorization"] == "Bearer dotenv-test-key"
 
 
-def test_llm_provider_defaults_to_qwen_plus_on_alibaba_bailian(monkeypatch: pytest.MonkeyPatch):
+def test_llm_provider_falls_back_when_base_url_is_missing(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
     _clear_llm_env(monkeypatch)
     monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
-    monkeypatch.setenv("LLM_API_KEY", "dashscope-test-key")
-
-    captured_request = {}
-
-    class FakeResponse:
-        def raise_for_status(self):
-            return None
-
-        def json(self):
-            return {
-                "choices": [
-                    {
-                        "message": {
-                            "content": '{"corrected_sentence":"OK","issue":"说明","better_expression":"OK","score":90}'
-                        }
-                    }
-                ]
-            }
-
-    def fake_post(url, headers, json, timeout):
-        captured_request["url"] = url
-        captured_request["json"] = json
-        captured_request["headers"] = headers
-        return FakeResponse()
-
-    monkeypatch.setattr(llm_provider.httpx, "post", fake_post)
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
 
     response = llm_provider.create_feedback_with_fallback(
         FeedbackRequest(scenario_id="interview", message="I want practice.")
     )
 
-    assert captured_request["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    assert captured_request["json"]["model"] == "qwen-plus"
-    assert captured_request["headers"]["Authorization"] == "Bearer dashscope-test-key"
-    assert response.score == 90
+    assert response.provider == "mock"
+    assert response.fallback_reason == "missing_base_url"
+
+
+def test_llm_provider_falls_back_when_model_is_missing(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="interview", message="I want practice.")
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "missing_model"
+
+
+def test_llm_timeout_allows_slow_provider_responses():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.LLM_TIMEOUT_SECONDS >= 90.0
+
+
+def test_llm_provider_info_logs_are_enabled():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.logger.isEnabledFor(logging.INFO)
 
 
 def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.MonkeyPatch):
@@ -282,10 +286,26 @@ def test_json_parser_accepts_markdown_code_fence_and_text():
     import app.llm_provider as llm_provider
 
     parsed = llm_provider._json_from_llm(
-        'Here is the result:\n```json\n{"provider":"llm","score":88}\n```\nThanks.'
+        'Here is the result:\n```json\n{"provider":"llm","score":88}\n```\nThanks.',
+        "feedback",
     )
 
     assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_logs_operation_without_response_content(caplog: pytest.LogCaptureFixture):
+    import app.llm_provider as llm_provider
+
+    content = "not-json-sensitive-response"
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(llm_provider.LLMResponseParseError):
+            llm_provider._json_from_llm(content, "summary")
+
+    assert "parse_failed" in caplog.text
+    assert "operation=summary" in caplog.text
+    assert f"response_length={len(content)}" in caplog.text
+    assert content not in caplog.text
 
 
 def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
