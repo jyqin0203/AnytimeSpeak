@@ -9,7 +9,7 @@ Use this guide before the final course submission. It focuses on the repository,
 - [ ] README with setup, current status, demo instructions, and dependency notes.
 - [ ] MVP checklist reviewed before submission.
 - [ ] Demo script reviewed before recording.
-- [ ] API contract available for explaining planned frontend/backend integration.
+- [ ] API contract available for explaining implemented frontend/backend integration.
 - [ ] PR history shows small, focused changes across the development period.
 - [ ] Commit history uses concise conventional commit messages.
 
@@ -27,7 +27,7 @@ Use this guide before the final course submission. It focuses on the repository,
 
 - [ ] Video length is close to the required 3 to 5 minute range.
 - [ ] Video shows the app starting from a clean local demo path.
-- [ ] Video covers scenario selection, practice conversation, grammar/expression feedback, post-session summary, scores, and technical architecture if those parts are implemented by final submission time.
+- [ ] Video covers scenario selection, practice conversation, grammar/expression feedback, pronunciation assessment if voice is used, post-session summary, scores, history, and technical architecture.
 - [ ] Video does not claim unimplemented features are complete.
 - [ ] Video uses mock mode if API keys are unavailable.
 - [ ] Video does not show `.env`, API keys, tokens, private accounts, or sensitive personal data.

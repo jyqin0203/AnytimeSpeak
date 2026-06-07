@@ -4,13 +4,13 @@
 
 AnytimeSpeak is a course challenge project focused on AI English speaking practice. The goal is to help learners rehearse realistic English conversations in common scenarios and receive actionable feedback after practice.
 
-The project prioritizes a complete and stable MVP demo over a broad but fragile feature set. The current MVP path includes a React + Vite + TypeScript frontend, a FastAPI backend, session-based scenario coaching, browser speech input/playback, user recording replay, LLM provider mode, and deterministic mock fallback.
+The project prioritizes a complete and stable MVP demo over a broad but fragile feature set. The current MVP path includes a React + Vite + TypeScript frontend, a FastAPI backend, session-based scenario coaching, browser speech input/playback, user recording replay, optional Doubao ASR, pronunciation assessment fallback, username/password auth, SQLite practice history, LLM provider mode, and deterministic mock fallback.
 
 ## Scope Update
 
-Early planning treated complex cloud accounts and cloud history as Non-MVP. That remains true: username/password login, OAuth, cloud sync, and long-term multi-device history are not required for the core MVP demo.
+Early planning treated accounts and history as non-MVP. Current `main` now includes a pragmatic username/password login flow and local SQLite practice history. OAuth, cloud sync, and long-term multi-device history remain future work.
 
-However, a lightweight Guest Profile plus local SQLite Practice History has been promoted into the demo-enhancement track. On current `main`, the stable source of truth is README Current Status, `docs/api-contract.md`, and current code. If a feature branch or Draft PR has Guest Profile / Practice History work, describe it as in progress until merged. Do not duplicate that work or claim it is implemented on `main` before the API and README confirm it.
+When this plan conflicts with current implementation details, use current code, README, and `docs/api-contract.md` as the source of truth.
 
 ## Topic Requirements
 
@@ -66,8 +66,10 @@ The MVP should deliver this complete loop:
 3. User sends English input. Voice is the preferred supported-browser path; text input remains the stable fallback.
 4. AI replies in role according to the selected scenario.
 5. The system gives grammar and expression feedback at a reasonable time.
-6. User ends the practice.
-7. The system generates a post-session summary and quantitative scores.
+6. For voice turns, the system can show compact pronunciation assessment.
+7. User ends the practice.
+8. The system generates a post-session summary and quantitative scores.
+9. Logged-in users can review saved practice history.
 
 MVP scenario coverage:
 
@@ -88,7 +90,7 @@ MVP feedback dimensions:
 The following are valuable but not prioritized before the stable MVP:
 
 - Full pronunciation phoneme-level scoring.
-- Full username/password accounts, OAuth, and cloud-synced history.
+- OAuth, cloud-synced history, and multi-device account sync.
 - Payment or subscription features.
 - Multi-user conversation rooms.
 - Native mobile apps.
@@ -107,6 +109,7 @@ The following are valuable but not prioritized before the stable MVP:
 - Browser `SpeechRecognition` for speech input where supported
 - Browser `SpeechSynthesis` for speech playback
 - Text fallback when browser speech features are unavailable
+- Chinese-first UI with English practice content
 
 ### Backend
 
@@ -115,7 +118,9 @@ The following are valuable but not prioritized before the stable MVP:
 - Environment-variable based LLM configuration
 - Mock response mode when no API key is available
 - Backend in-memory sessions for the active coaching flow
-- Local SQLite only for lightweight Guest Profile / Practice History when that feature is merged
+- Local SQLite for username/password users and practice history
+- Optional Doubao ASR relay
+- Optional pronunciation provider mode with heuristic fallback
 
 ### AI Layer
 
