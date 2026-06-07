@@ -214,13 +214,55 @@ export const localScenarios: Scenario[] = [
 ];
 
 const LEVEL_ZH: Record<string, string> = {
+  // single words
   beginner: "入门", elementary: "入门", basic: "入门",
   intermediate: "进阶", medium: "进阶",
   advanced: "高级", expert: "高级", proficient: "高级",
+  // compound phrases from backend catalog
+  "beginner to intermediate": "入门",
+  "intermediate to upper-intermediate": "进阶",
+  "intermediate to advanced": "进阶",
+  "upper-intermediate": "进阶",
+  "upper-intermediate to advanced": "高级",
+};
+
+const FOCUS_ZH: Record<string, string> = {
+  // grammar
+  "tense consistency": "时态一致",
+  "subject-verb agreement": "主谓一致",
+  "article usage": "冠词用法",
+  "articles": "冠词",
+  "countable nouns": "可数名词",
+  "modal verbs": "情态动词",
+  "polite modal verbs": "礼貌情态动词",
+  "present perfect": "现在完成时",
+  "past tense": "过去时",
+  "future plans": "将来时表达",
+  "prepositions": "介词",
+  "common prepositions": "常用介词",
+  "prepositions of place and time": "时间地点介词",
+  "word order": "语序",
+  "basic sentence structure": "基础句式",
+  "tense use": "时态使用",
+  // expression
+  "professional wording": "专业措辞",
+  "structured answers": "结构化回答",
+  "professional update phrases": "职场更新用语",
+  "clear requests": "清晰请求",
+  "natural ordering phrases": "自然点餐用语",
+  "polite question forms": "礼貌疑问句",
+  "question forms": "疑问句形式",
+  "travel vocabulary": "旅行词汇",
+  "clear problem descriptions": "清晰问题描述",
+  "natural small talk": "日常闲聊",
 };
 
 function normalizeLevel(raw: string): string {
   return LEVEL_ZH[raw.toLowerCase()] ?? raw;
+}
+
+function normalizeFocus(tag: string): string {
+  return FOCUS_ZH[tag.toLowerCase()] ?? tag;
 }
 
 export async function fetchScenarios(): Promise<Scenario[]> {
@@ -243,7 +285,7 @@ export async function fetchScenarios(): Promise<Scenario[]> {
       storyIntroEn: scenario.story_intro_en,
       level: local?.level ?? normalizeLevel(scenario.level),
       duration: local?.duration ?? "8 分钟",
-      focus: local?.focus ?? scenario.feedback_focus,
+      focus: local?.focus ?? scenario.feedback_focus.map(normalizeFocus),
       usefulExpressions: scenario.useful_expressions,
       openingLine: scenario.opening_message ?? scenario.opening_line,
       replies: local?.replies ?? [scenario.opening_line],
