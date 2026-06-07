@@ -6,6 +6,7 @@ from app.schemas import ChatMessage, ChatRequest, FeedbackRequest, SummaryReques
 def _clear_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("LLM_PROVIDER_MODE", "OPENAI_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANYTIMESPEAK_SKIP_DOTENV", "1")
 
 
 def test_chat_fallback_stays_mock_when_llm_env_is_missing(monkeypatch: pytest.MonkeyPatch):
@@ -137,6 +138,59 @@ def test_llm_api_key_env_takes_priority_over_openai_key(monkeypatch: pytest.Monk
     )
 
     assert captured_headers["Authorization"] == "Bearer llm-test-key"
+
+
+def test_llm_provider_loads_project_dotenv_without_printing_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    import app.llm_provider as llm_provider
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.delenv("ANYTIMESPEAK_SKIP_DOTENV", raising=False)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER_MODE=llm",
+                "LLM_API_KEY=dotenv-test-key",
+                "LLM_BASE_URL=https://example.test/v1",
+                "LLM_MODEL=demo-model",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm_provider, "_dotenv_paths", lambda: [dotenv_path])
+
+    captured_headers = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"corrected_sentence":"OK","issue":"说明","better_expression":"OK","score":90}'
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured_headers.update(headers)
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_provider.httpx, "post", fake_post)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="interview", message="I want practice.")
+    )
+
+    assert response.provider == "llm"
+    assert captured_headers["Authorization"] == "Bearer dotenv-test-key"
 
 
 def test_llm_provider_defaults_to_qwen_plus_on_alibaba_bailian(monkeypatch: pytest.MonkeyPatch):

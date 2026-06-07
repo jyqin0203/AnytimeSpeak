@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Any
 
 import httpx
+from dotenv import load_dotenv
 
 from app import mock_service
 from app.scenario_catalog import get_scenario_prompt_config
@@ -31,6 +33,21 @@ logger = logging.getLogger(__name__)
 
 class LLMResponseParseError(ValueError):
     pass
+
+
+def _dotenv_paths() -> list[Path]:
+    backend_dir = Path(__file__).resolve().parents[1]
+    project_root = backend_dir.parent
+    return [project_root / ".env", backend_dir / ".env"]
+
+
+def _load_dotenv_files() -> None:
+    if os.getenv("ANYTIMESPEAK_SKIP_DOTENV", "").strip() == "1":
+        return
+
+    for path in _dotenv_paths():
+        if path.exists():
+            load_dotenv(path, override=False)
 
 
 def _log_llm_attempt(operation: str) -> None:
@@ -158,6 +175,7 @@ def _mock_summary(request: SummaryRequest, reason: str) -> SummaryResponse:
 
 
 def _llm_config_fallback_reason() -> str | None:
+    _load_dotenv_files()
     provider_mode = os.getenv("LLM_PROVIDER_MODE", "mock").strip().lower()
     if provider_mode != "llm":
         return "provider_mode_not_llm"

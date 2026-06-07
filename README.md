@@ -60,6 +60,7 @@ Expected response:
 ### Environment Variables
 
 Copy `.env.example` to `.env` for local provider configuration when LLM integration is added later. Do not commit `.env` or real API keys.
+The backend automatically loads provider variables from `.env` in the project root or `backend/.env`, while shell environment variables still take priority.
 
 ## Demo Video
 
