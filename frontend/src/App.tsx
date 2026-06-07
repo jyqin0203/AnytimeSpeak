@@ -14,11 +14,17 @@ import {
   type SessionSummary,
 } from "./api/coaching";
 import { VoiceControls } from "./components/VoiceControls";
+import {
+  providerBadgeText,
+  providerStatusText,
+  sourceFromProvider,
+  sourceLabel,
+  type SourceState,
+} from "./providerStatus";
 import { useSpeechInput, useSpeechOutput, useVoiceRecorder, type VoiceRecording } from "./speech";
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary";
-type SourceState = "llm" | "backend-mock" | "local-fallback";
 type AsyncState = "idle" | "loading" | "error";
 
 const features = ["场景化练习", "AI 角色对话", "语法 / 表达反馈", "课后总结评分"];
@@ -61,7 +67,7 @@ function App() {
       const backendScenarios = await fetchScenarios();
       setScenarios(backendScenarios);
       setSelected((current) => backendScenarios.find((scenario) => scenario.id === current.id) ?? backendScenarios[0]);
-      setSource("backend-mock");
+      setSource("backend-connected");
       setScenarioStatus("idle");
       setStatusText("已连接练习服务，可以开始场景练习。");
     } catch {
@@ -98,7 +104,7 @@ function App() {
           openingLine: session.openingMessage,
         }));
         setMessages([{ id: 1, sender: "ai", text: session.openingMessage }]);
-        setSource("backend-mock");
+        setSource("backend-connected");
         setStatusText("已根据本轮场景故事开始练习。");
       })
       .catch(() => {
@@ -791,30 +797,6 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
 }
 
 export default App;
-
-function sourceFromProvider(provider: string): SourceState {
-  if (provider === "llm") return "llm";
-  if (provider === "mock") return "backend-mock";
-  return "local-fallback";
-}
-
-function sourceLabel(source: SourceState): string {
-  if (source === "llm") return "LLM";
-  if (source === "backend-mock") return "后端 Mock / Fallback";
-  return "前端本地模式";
-}
-
-function providerStatusText(provider: string, fallbackReason?: string | null): string {
-  if (provider === "llm") return "本轮来自真实 LLM。";
-  if (provider === "mock") return `后端 API 成功，但后端 fallback 到 mock。原因：${fallbackReason ?? "未提供"}`;
-  return "前端完全请求不到后端，已使用前端本地模式。";
-}
-
-function providerBadgeText(provider: string): string {
-  if (provider === "llm") return "由 LLM 生成";
-  if (provider === "mock") return "后端 Mock / Fallback";
-  return "前端本地模式";
-}
 
 function loadingLabel(text: string): string {
   if (text.includes("分析")) return "正在分析";
