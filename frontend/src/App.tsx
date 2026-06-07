@@ -1125,6 +1125,7 @@ function Practice({
 
     latestTranscriptRef.current = "";
     speechInput.resetTranscript();
+    onInput("");
     void voiceRecorder.startRecording().finally(() => {
       speechInput.startListening();
     });

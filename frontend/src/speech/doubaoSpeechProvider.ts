@@ -60,6 +60,13 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
     let disposed = false;
     let endSent = false;
     let finalAccum = "";
+    let ended = false;
+
+    const notifyEnd = () => {
+      if (ended) return;
+      ended = true;
+      callbacks.onEnd?.();
+    };
 
     const cleanupAudio = () => {
       try {
@@ -228,21 +235,23 @@ export const doubaoSpeechProvider: SpeechInputProvider = {
 
       ws.onclose = () => {
         cleanupAudio();
-        if (!disposed) {
-          callbacks.onEnd?.();
-        }
+        notifyEnd();
       };
     };
 
     return {
       start: () => {
         disposed = false;
+        ended = false;
+        endSent = false;
         finalAccum = "";
         void initSession();
       },
       stop: () => {
+        disposed = true;
         cleanupAudio();
-        sendEnd();
+        cleanupWs();
+        notifyEnd();
       },
       abort: () => {
         disposed = true;
