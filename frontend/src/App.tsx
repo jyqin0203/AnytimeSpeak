@@ -41,7 +41,15 @@ import {
   sourceLabel,
   type SourceState,
 } from "./providerStatus";
-import { useSpeechInput, useSpeechOutput, useVoiceRecorder, type VoiceRecording } from "./speech";
+import {
+  browserSpeechInputProvider,
+  doubaoSpeechProvider,
+  useSpeechInput,
+  useSpeechOutput,
+  useVoiceRecorder,
+  type SpeechInputProvider,
+  type VoiceRecording,
+} from "./speech";
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary" | "history" | "history-detail";
@@ -84,8 +92,26 @@ function App() {
   // saved retroactively when the user creates a profile.
   const pendingHistoryRef = useRef<Omit<SaveHistoryPayload, "userId"> | null>(loadPendingHistory());
 
+  // ASR provider: start with browser fallback, upgrade to Doubao if configured
+  const [asrProvider, setAsrProvider] = useState<SpeechInputProvider>(browserSpeechInputProvider);
+
   useEffect(() => {
     void loadScenarios();
+  }, []);
+
+  useEffect(() => {
+    // Fetch ASR mode from backend; switch to Doubao provider when available
+    const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+    fetch(`${apiBase}/api/asr/mode`)
+      .then((r) => r.json())
+      .then((data: { asr_mode?: string }) => {
+        if (data.asr_mode === "doubao" && doubaoSpeechProvider.getSupport()) {
+          setAsrProvider(doubaoSpeechProvider);
+        }
+      })
+      .catch(() => {
+        // Keep browser provider on network error — text fallback always available
+      });
   }, []);
 
   useEffect(() => {
@@ -460,11 +486,13 @@ function App() {
           source={source}
           statusText={statusText}
           sendStatus={sendStatus}
+          asrProvider={asrProvider}
           onInput={setInput}
           onSend={send}
           onSendText={submitVoiceText}
           onEnd={endPractice}
           onReset={() => setView("scenarios")}
+          onAsrFallback={() => setAsrProvider(browserSpeechInputProvider)}
         />
       )}
       {view === "summary" && (
@@ -987,11 +1015,13 @@ function Practice({
   source,
   statusText,
   sendStatus,
+  asrProvider,
   onInput,
   onSend,
   onSendText,
   onEnd,
   onReset,
+  onAsrFallback,
 }: {
   scenario: Scenario;
   messages: Message[];
@@ -1003,11 +1033,13 @@ function Practice({
   source: SourceState;
   statusText: string;
   sendStatus: AsyncState;
+  asrProvider: SpeechInputProvider;
   onInput: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onSendText: (value: string, recording?: VoiceRecording | null) => void;
   onEnd: () => void;
   onReset: () => void;
+  onAsrFallback: () => void;
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestFeedback = feedback[feedback.length - 1];
@@ -1019,8 +1051,12 @@ function Practice({
   const playbackRef = useRef<HTMLAudioElement | null>(null);
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
   const voiceRecorder = useVoiceRecorder();
+  // Use Doubao ASR when configured; otherwise falls back to browser SpeechRecognition.
+  // The lang for Doubao is "zh-CN" (mixed Chinese-English); browser uses "en-US".
+  const speechInputLang = asrProvider.id === "doubao-asr" ? "zh-CN" : "en-US";
   const speechInput = useSpeechInput({
-    lang: "en-US",
+    provider: asrProvider,
+    lang: speechInputLang,
     interimResults: true,
     continuous: true,
     onTranscriptChange: (transcript) => {
@@ -1029,6 +1065,13 @@ function Practice({
     },
   });
   const isRecording = speechInput.isListening || speechInput.isRestarting;
+
+  // When Doubao ASR fails, automatically fall back to browser SpeechRecognition.
+  useEffect(() => {
+    if (asrProvider.id === "doubao-asr" && speechInput.error) {
+      onAsrFallback();
+    }
+  }, [asrProvider.id, speechInput.error, onAsrFallback]);
 
   useEffect(() => {
     if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
@@ -1163,7 +1206,13 @@ function Practice({
             className="chat-input"
             value={input}
             onChange={(e) => onInput(e.target.value)}
-            placeholder={isRecording ? "聆听中，再点一次停止并发送..." : "输入回答，或点击右侧麦克风说话"}
+            placeholder={
+              isRecording
+                ? asrProvider.id === "doubao-asr"
+                  ? "豆包语音识别中，再点一次停止并发送..."
+                  : "聆听中，再点一次停止并发送..."
+                : "输入回答，或点击右侧麦克风说话"
+            }
             disabled={sendStatus === "loading"}
             autoComplete="off"
           />
@@ -1181,6 +1230,11 @@ function Practice({
             {sendStatus === "loading" ? "..." : "发送"}
           </button>
         </form>
+        {speechInput.error && asrProvider.id !== "doubao-asr" && (
+          <p className="asr-error" role="alert">
+            语音识别：{speechInput.error.message}
+          </p>
+        )}
       </div>
 
       <aside className="feedback-panel">

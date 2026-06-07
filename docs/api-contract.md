@@ -51,6 +51,55 @@ Scenario objects now include `scenario_id`, `title`, `title_zh`, `ai_role`, `use
 
 `provider` is a small string enum returned by `/api/feedback`, `/api/summary`, and the chat endpoint's `quick_feedback`. It is purely informational 鈥?`"llm"` means the response came from a successful real-provider call, `"mock"` means the deterministic rule-based fallback produced it (because `LLM_PROVIDER_MODE` is not `llm`, required env vars are missing, or the live call failed). The backend only ever logs the provider mode and a short fallback-reason summary (e.g. exception type), never the API key, request payload, or raw error text.
 
+## ASR Provider API
+
+Speech recognition is optional and must keep text input available. API keys, app IDs, access tokens, resource IDs, and raw provider errors must never be returned to the browser.
+
+### GET /api/asr/mode
+
+Returns the active speech recognition mode.
+
+Current status: implemented.
+
+#### Response Example
+
+```json
+{
+  "asr_mode": "doubao"
+}
+```
+
+`"doubao"` is returned only when `ASR_PROVIDER_MODE=doubao` and the required Doubao credentials are present. Otherwise the endpoint returns `"browser"` so the frontend can use browser speech recognition or text input.
+
+### WebSocket /ws/asr
+
+Relays browser microphone audio to Doubao BigModel Streaming ASR.
+
+Current status: implemented.
+
+Frontend to backend:
+
+```json
+{"type":"config","lang":"zh-CN"}
+```
+
+Then send binary frames containing PCM 16-bit, 16 kHz, mono audio chunks. When the user stops speaking, send:
+
+```json
+{"type":"end"}
+```
+
+Backend to frontend:
+
+```json
+{"type":"ready"}
+{"type":"partial","transcript":"Hello, this is a speaking test."}
+{"type":"final","transcript":"Hello, this is a speaking test."}
+{"type":"error","code":"network","message":"Doubao speech recognition is temporarily unavailable; switched back to browser speech recognition."}
+```
+
+The backend supports the Volcano Engine BigModel ASR V3 binary frame protocol via `volcengine-audio`. New console credentials use `DOUBAO_API_KEY` plus `DOUBAO_RESOURCE_ID`; legacy console credentials can use `DOUBAO_APP_ID`, `DOUBAO_ASR_TOKEN`, and `DOUBAO_RESOURCE_ID`.
+
 ## GET /api/health
 
 Checks whether the backend service is running.

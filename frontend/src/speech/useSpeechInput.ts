@@ -95,6 +95,25 @@ export function useSpeechInput({
           setState((current) => ({ ...current, isListening: false, isRestarting: false, error }));
         },
         onResult: (result) => {
+          if (result.providerId === "doubao-asr") {
+            const nextTranscript = result.transcript.trim();
+            const nextFinalTranscript = result.finalTranscript.trim();
+            finalTranscriptRef.current = nextFinalTranscript;
+            setState((current) => ({
+              ...current,
+              transcript: nextTranscript,
+              finalTranscript: nextFinalTranscript,
+              interimTranscript: result.interimTranscript,
+              error: null,
+            }));
+            onTranscriptChangeRef.current?.(nextTranscript, {
+              ...result,
+              transcript: nextTranscript,
+              finalTranscript: nextFinalTranscript,
+            });
+            return;
+          }
+
           const nextFinalTranscript = result.finalTranscript
             ? `${finalTranscriptRef.current} ${result.finalTranscript}`.trim()
             : finalTranscriptRef.current;
