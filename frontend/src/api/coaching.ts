@@ -213,6 +213,16 @@ export const localScenarios: Scenario[] = [
   },
 ];
 
+const LEVEL_ZH: Record<string, string> = {
+  beginner: "入门", elementary: "入门", basic: "入门",
+  intermediate: "进阶", medium: "进阶",
+  advanced: "高级", expert: "高级", proficient: "高级",
+};
+
+function normalizeLevel(raw: string): string {
+  return LEVEL_ZH[raw.toLowerCase()] ?? raw;
+}
+
 export async function fetchScenarios(): Promise<Scenario[]> {
   const apiScenarios = await request<ApiScenario[]>("/api/scenarios");
   const localById = new Map(localScenarios.map((scenario) => [scenario.id, scenario]));
@@ -231,7 +241,7 @@ export async function fetchScenarios(): Promise<Scenario[]> {
       storySeedId: scenario.story_seed_id,
       storyIntroZh: scenario.story_intro_zh,
       storyIntroEn: scenario.story_intro_en,
-      level: local?.level ?? scenario.level,
+      level: local?.level ?? normalizeLevel(scenario.level),
       duration: local?.duration ?? "8 分钟",
       focus: local?.focus ?? scenario.feedback_focus,
       usefulExpressions: scenario.useful_expressions,
