@@ -1,245 +1,230 @@
+import random
+import re
+from datetime import datetime, timezone
+from uuid import uuid4
+
 from app.schemas import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
     FeedbackRequest,
+    FeedbackScoreBreakdown,
     FeedbackResponse,
+    PracticeSession,
     Scenario,
     ScoreBreakdown,
+    StartSessionRequest,
     SummaryRequest,
     SummaryResponse,
 )
-from app.scenario_catalog import get_scenario_prompt_config
+from app.scenario_catalog import (
+    ScenarioPromptConfig,
+    StorySeed,
+    get_scenario_prompt_config,
+    list_scenario_prompt_configs,
+)
 
 
-SCENARIOS: dict[str, Scenario] = {
-    "interview": Scenario(
-        id="interview",
-        title="Interview",
-        title_zh="面试",
-        level="Intermediate",
-        ai_role="Hiring manager",
-        user_role="Job candidate",
-        goal=(
-            "Answer interview questions clearly, explain experience, and ask "
-            "professional follow-up questions."
-        ),
-        opening_line=(
-            "Hi, thanks for joining today. Could you briefly introduce yourself "
-            "and tell me why you are interested in this role?"
-        ),
-        conversation_style="Professional, warm, and focused on one question at a time.",
-        feedback_focus=[
-            "tense consistency",
-            "professional wording",
-            "clear examples",
-            "structured answers",
-        ],
-    ),
-    "restaurant": Scenario(
-        id="restaurant",
-        title="Ordering Food",
-        title_zh="点餐",
-        level="Beginner to intermediate",
-        ai_role="Restaurant server",
-        user_role="Customer",
-        goal=(
-            "Order food, ask about recommendations, clarify preferences, and "
-            "handle simple service questions."
-        ),
-        opening_line="Welcome! Are you ready to order, or would you like a few recommendations first?",
-        conversation_style="Friendly, practical, and focused on completing the order.",
-        feedback_focus=[
-            "polite requests",
-            "articles",
-            "countable nouns",
-            "clear preferences",
-        ],
-    ),
-    "ordering_food": Scenario(
-        id="ordering_food",
-        title="Ordering Food",
-        title_zh="点餐",
-        level="Beginner to intermediate",
-        ai_role="Restaurant server",
-        user_role="Customer",
-        goal=(
-            "Order food, ask about recommendations, clarify preferences, and "
-            "handle simple service questions."
-        ),
-        opening_line="Welcome! Are you ready to order, or would you like a few recommendations first?",
-        conversation_style="Friendly, practical, and focused on completing the order.",
-        feedback_focus=[
-            "polite requests",
-            "articles",
-            "countable nouns",
-            "clear preferences",
-        ],
-    ),
-    "meeting": Scenario(
-        id="meeting",
-        title="Meeting",
-        title_zh="会议",
-        level="Intermediate",
-        ai_role="Team lead",
-        user_role="Team member",
-        goal=(
-            "Share progress, discuss blockers, ask for clarification, and agree "
-            "on next steps."
-        ),
-        opening_line="Let's start with your update. What progress have you made since our last meeting?",
-        conversation_style="Work-focused, concise, collaborative, and action-oriented.",
-        feedback_focus=[
-            "present perfect",
-            "blocker phrasing",
-            "clarifying questions",
-            "next steps",
-        ],
-    ),
-    "travel": Scenario(
-        id="travel",
-        title="Travel",
-        title_zh="旅行",
-        level="Beginner to intermediate",
-        ai_role="Travel service representative or helpful local guide",
-        user_role="Traveler",
-        goal=(
-            "Ask for travel information, check in, confirm reservations, and "
-            "handle simple travel problems."
-        ),
-        opening_line="Hello! How can I help you with your trip today?",
-        conversation_style="Clear, patient, and practical.",
-        feedback_focus=[
-            "question forms",
-            "prepositions",
-            "polite requests",
-            "travel vocabulary",
-        ],
-    ),
-    "daily_conversation": Scenario(
-        id="daily_conversation",
-        title="Daily Conversation",
-        title_zh="日常交流",
-        level="Beginner to intermediate",
-        ai_role="Friendly conversation partner",
-        user_role="English learner",
-        goal="Practice casual English about daily life, preferences, and simple follow-up questions.",
-        opening_line="Hi! How's your day going so far?",
-        conversation_style="Casual, friendly, and low-pressure.",
-        feedback_focus=[
-            "basic sentence structure",
-            "tense use",
-            "word order",
-            "natural small talk",
-        ],
-    ),
-}
+SCENARIOS: dict[str, Scenario] = {}
+SESSIONS: dict[str, PracticeSession] = {}
+
+
+def _build_scenarios() -> dict[str, Scenario]:
+    scenarios: dict[str, Scenario] = {}
+    for config in list_scenario_prompt_configs():
+        seed = config.default_story_seed
+        scenario = Scenario(
+            id="restaurant" if config.scenario_id == "ordering_food" else config.scenario_id,
+            scenario_id=config.scenario_id,
+            title=config.title_en,
+            title_zh=config.title_zh,
+            level=config.level,
+            ai_role=config.ai_role,
+            user_role=config.user_role,
+            goal=config.goal,
+            story_seed_id=seed.seed_id,
+            story_intro_zh=seed.story_intro_zh,
+            story_intro_en=seed.story_intro_en,
+            opening_line=seed.opening_message,
+            opening_message=seed.opening_message,
+            conversation_style=config.conversation_style,
+            feedback_focus=config.feedback_focus,
+            useful_expressions=config.useful_expressions,
+        )
+        scenarios[scenario.id] = scenario
+        scenarios[config.scenario_id] = scenario
+    return scenarios
+
+
+SCENARIOS.update(_build_scenarios())
 
 
 def list_scenarios() -> list[Scenario]:
-    return list(SCENARIOS.values())
+    return [
+        SCENARIOS["interview"],
+        SCENARIOS["restaurant"],
+        SCENARIOS["meeting"],
+        SCENARIOS["travel"],
+        SCENARIOS["daily_conversation"],
+    ]
+
+
+def get_session(session_id: str | None) -> PracticeSession | None:
+    if not session_id:
+        return None
+    return SESSIONS.get(session_id)
+
+
+def _select_story_seed(config: ScenarioPromptConfig, requested_seed_id: str | None) -> StorySeed:
+    if requested_seed_id:
+        for seed in config.story_seeds:
+            if seed.seed_id == requested_seed_id:
+                return seed
+    return random.choice(config.story_seeds)
+
+
+def start_session(request: StartSessionRequest) -> PracticeSession:
+    config = get_scenario_prompt_config(request.scenario_id)
+    seed = _select_story_seed(config, request.story_seed_id)
+    base_scenario = _scenario_for(request.scenario_id)
+
+    scenario = base_scenario.model_copy(
+        update={
+            "story_seed_id": seed.seed_id,
+            "story_intro_zh": seed.story_intro_zh,
+            "story_intro_en": seed.story_intro_en,
+            "opening_line": seed.opening_message,
+            "opening_message": seed.opening_message,
+        }
+    )
+
+    session = PracticeSession(
+        session_id=f"session_{uuid4().hex[:12]}",
+        scenario_id=scenario.id,
+        scenario=scenario,
+        story_seed_id=seed.seed_id,
+        story_intro_zh=seed.story_intro_zh,
+        story_intro_en=seed.story_intro_en,
+        opening_message=seed.opening_message,
+        messages=[],
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+    SESSIONS[session.session_id] = session
+    return session
+
+
+def resolve_scenario(session_id: str | None, scenario_id: str) -> Scenario:
+    session = get_session(session_id)
+    if session is not None:
+        return session.scenario
+    return _scenario_for(scenario_id)
 
 
 def create_chat_reply(request: ChatRequest) -> ChatResponse:
-    scenario = _scenario_for(request.scenario_id)
-    user_message = _latest_user_text(request.messages)
+    scenario = resolve_scenario(request.session_id, request.scenario_id)
+    user_message = _latest_user_text(request)
     reply_text = _scenario_reply(scenario.id, user_message)
     feedback = create_feedback(
-        FeedbackRequest(scenario_id=scenario.id, message=user_message or "Hello.")
+        FeedbackRequest(
+            session_id=request.session_id,
+            scenario_id=scenario.id,
+            latest_user_message=user_message or "Hello.",
+            conversation_history=_conversation_history(request),
+        )
     )
 
     return ChatResponse(
+        session_id=request.session_id or f"session_{uuid4().hex[:12]}",
         scenario_id=scenario.id,
         reply=ChatMessage(role="assistant", content=reply_text),
         quick_feedback=feedback,
+        provider=feedback.provider,
+        fallback_reason=feedback.fallback_reason,
     )
 
 
 def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
-    scenario = _scenario_for(request.scenario_id)
-    message = request.message.strip()
-    lowered = message.lower()
+    scenario = resolve_scenario(request.session_id, request.scenario_id)
+    message = _feedback_latest_text(request) or "Hello."
 
-    if _contains_chinese(message):
-        intent = _mixed_language_intent(message)
-        expression = _mixed_language_expression(scenario.id, message)
-        return FeedbackResponse(
-            corrected_sentence=expression,
-            issue=(
-                "你可以先用中文或中英夹杂表达想法，意思已经可以理解。"
-                "下一步是把核心动作和名词换成自然英文。"
-            ),
-            better_expression=expression,
-            user_intent_zh=intent,
-            code_switching_tip=_code_switching_tip(message, expression),
-            score=80,
-        )
+    has_chinese = _contains_chinese(message)
+    word_count = len(message.split())
+    on_topic = _is_on_topic(scenario, message)
+    chinglish_hits = _detect_chinglish(message)
+    grammar_hits = _detect_grammar_issues(message)
 
-    if "am graduated" in lowered or "responsible for make" in lowered:
-        corrected = (
-            message.replace("I am graduated", "I graduated")
-            .replace("i am graduated", "I graduated")
-            .replace("responsible for make", "responsible for making")
-        )
-        return FeedbackResponse(
-            corrected_sentence=corrected,
-            issue=(
-                "Use the simple past for completed events, and use a gerund after "
-                "'responsible for'."
-            ),
-            better_expression=(
-                "I contributed to a customer research project and prepared the "
-                "final report for our team."
-            ),
-            user_intent_zh=None,
-            code_switching_tip=None,
-            score=74,
-        )
+    grammar = 90
+    naturalness = 90
+    relevance = 90 if on_topic else 66
+    clarity = 90
 
-    if "recommend me" in lowered or "i want " in lowered:
-        corrected = (
-            message.replace("Can you recommend me some drink?", "Could you recommend a drink for me?")
-            .replace("I want", "I'd like")
-        )
-        return FeedbackResponse(
-            corrected_sentence=corrected,
-            issue="Use polite request forms and natural restaurant wording.",
-            better_expression="I'd like a chicken sandwich, please. Could you recommend a drink for me?",
-            user_intent_zh=None,
-            code_switching_tip=None,
-            score=82,
-        )
+    issue_notes: list[str] = []
+    why_notes: list[str] = []
 
-    if "some problem with api" in lowered or "team give me" in lowered:
-        corrected = (
-            message.replace("some problem with API", "a problem with the API")
-            .replace("backend team give me", "the backend team to give me")
-        )
-        return FeedbackResponse(
-            corrected_sentence=corrected,
-            issue="Use articles with countable nouns and the pattern 'need someone to do something'.",
-            better_expression=(
-                "The main blocker is that I need the backend team to confirm the "
-                "API response format."
-            ),
-            user_intent_zh=None,
-            code_switching_tip=None,
-            score=76,
-        )
+    if has_chinese:
+        naturalness -= 14
+        clarity -= 8
+        issue_notes.append("你的句子里中文和英文混在一起，意思已经能理解，但还没有完全转换成英文口语表达。")
+        why_notes.append("把整句话统一成英文表达，能让对方更顺畅地接住你的话，也更贴近真实场景里的口语习惯。")
 
-    return FeedbackResponse(
-        corrected_sentence=message,
-        issue=f"No major grammar issue for the {scenario.title.lower()} scenario.",
-        better_expression=_default_better_expression(scenario.id),
-        user_intent_zh=None,
-        code_switching_tip=None,
-        score=88,
+    if grammar_hits:
+        pattern, fix = grammar_hits[0]
+        grammar -= 12
+        clarity -= 4
+        issue_notes.append(f"注意 “{pattern}” 这里的用法，更地道的说法是 “{fix}”。")
+        why_notes.append("时态、单复数和介词搭配是口语里最容易被听出来的细节，调整后会显得更专业、更自然。")
+
+    if "what do you do recently" in message.lower():
+        naturalness -= 8
+        issue_notes.append("“What do you do recently?” 不自然。询问近况通常用现在完成时，而不是一般现在时的 “do recently”。")
+        why_notes.append("日常交流里更自然的问法是 “What have you been up to recently?” 或 “What have you been doing recently?”。")
+
+    if chinglish_hits:
+        pattern, fix = chinglish_hits[0]
+        naturalness -= 10
+        issue_notes.append(f"“{pattern}” 这种说法偏中式英语，母语者更习惯说 “{fix}”。")
+        why_notes.append(f"换成 “{fix}” 这样的地道搭配，会更符合母语者的表达习惯，听起来也更顺耳。")
+
+    if not on_topic:
+        relevance -= 18
+        issue_notes.append(f"这句话和当前“{scenario.title_zh}”场景的目标关联较弱，可以再贴近一下情境。")
+        why_notes.append(f"紧扣 {scenario.ai_role} 关心的内容来组织表达，对话会更顺畅地推进到下一步。")
+
+    if word_count <= 3:
+        clarity -= 10
+        naturalness -= 4
+        issue_notes.append("这句话信息量比较少，建议补充一两个具体细节，让对方更容易接住话题。")
+        why_notes.append("加入具体的人物、时间、原因或例子，可以让表达更完整，也更容易引出下一轮对话。")
+
+    if not issue_notes:
+        issue_notes.append("这句话整体清楚、语法也没有明显问题，已经达到了这一轮的表达目标。")
+        why_notes.append("可以尝试加入一个自然的连接词或具体细节，让口语听起来更像母语者的延伸表达，而不只是正确。")
+
+    issue = " ".join(issue_notes[:2])
+    why = " ".join(why_notes[:2])
+
+    recommended_english = _compose_recommended_english(scenario, message, has_chinese, grammar_hits, chinglish_hits)
+    more_natural_option = _compose_more_natural_option(scenario, recommended_english)
+    user_intent = _describe_user_intent(scenario, message, has_chinese)
+
+    return _feedback_response(
+        what_you_said=message,
+        user_intent=user_intent,
+        recommended_english=recommended_english,
+        issue=issue,
+        why=why,
+        more_natural_option=more_natural_option,
+        grammar=grammar,
+        naturalness=naturalness,
+        relevance=relevance,
+        clarity=clarity,
     )
 
 
 def create_summary(request: SummaryRequest) -> SummaryResponse:
-    scenario = _scenario_for(request.scenario_id)
-    user_turns = [message.content for message in request.messages if message.role == "user"]
+    scenario = resolve_scenario(request.session_id, request.scenario_id)
+    history = _summary_history(request)
+    user_turns = [message.content for message in history if message.role == "user"]
     joined_user_text = " ".join(user_turns).lower()
     turn_count = len(user_turns)
 
@@ -261,21 +246,21 @@ def create_summary(request: SummaryRequest) -> SummaryResponse:
     return SummaryResponse(
         scenario_id=scenario.id,
         summary=(
-            f"You completed a {scenario.title.lower()} practice session with clear intent "
-            "and enough context for the AI role to keep the conversation moving."
+            f"你完成了一次「{scenario.title_zh}」场景的练习，目标表达得比较清楚，"
+            "也给了 AI 角色足够的信息来推进这段对话。"
         ),
         strengths=[
-            "You responded to the scenario prompt with relevant information.",
-            "Your meaning was understandable across the conversation.",
+            "你的回答围绕场景目标展开，信息相关且有内容。",
+            "整体表达可以被理解，对话能够顺利进行下去。",
         ],
         repeated_issues=_repeated_issues(scenario.id),
         better_expressions=_summary_expressions(scenario.id),
         scenario_completion=(
-            f"You practiced the main {scenario.title.lower()} communication goal. "
-            "Add one more specific detail or follow-up question next time."
+            f"你已经完成了「{scenario.title_zh}」场景的主要沟通目标。"
+            "下次可以再补充一个具体细节或追问，让回答更完整。"
         ),
         next_practice_focus=_next_focus(scenario.id),
-        code_switching_advice=_summary_code_switching_advice(request.messages),
+        code_switching_advice=_summary_code_switching_advice(history),
         scores=ScoreBreakdown(
             grammar=grammar,
             expression=expression,
@@ -283,6 +268,7 @@ def create_summary(request: SummaryRequest) -> SummaryResponse:
             scenario_completion=scenario_completion,
             overall=overall,
         ),
+        provider="mock",
     )
 
 
@@ -292,11 +278,76 @@ def _scenario_for(scenario_id: str) -> Scenario:
     return SCENARIOS.get(scenario_id, SCENARIOS["interview"])
 
 
-def _latest_user_text(messages: list[ChatMessage]) -> str:
-    for message in reversed(messages):
+def _conversation_history(request: ChatRequest) -> list[ChatMessage]:
+    return request.conversation_history or request.messages
+
+
+def _summary_history(request: SummaryRequest) -> list[ChatMessage]:
+    return request.conversation_history or request.messages
+
+
+def _latest_user_text(request: ChatRequest) -> str:
+    if request.latest_user_message:
+        return request.latest_user_message.strip()
+    for message in reversed(_conversation_history(request)):
         if message.role == "user":
             return message.content
     return ""
+
+
+def _feedback_latest_text(request: FeedbackRequest) -> str:
+    return (request.latest_user_message or request.message or "").strip()
+
+
+def _feedback_response(
+    *,
+    what_you_said: str,
+    user_intent: str,
+    recommended_english: str,
+    issue: str,
+    why: str,
+    more_natural_option: str,
+    grammar: int,
+    naturalness: int,
+    relevance: int,
+    clarity: int,
+    provider: str = "mock",
+) -> FeedbackResponse:
+    score_breakdown = FeedbackScoreBreakdown(
+        grammar=_clamp_score(grammar),
+        naturalness=_clamp_score(naturalness),
+        relevance=_clamp_score(relevance),
+        clarity=_clamp_score(clarity),
+    )
+    return FeedbackResponse(
+        what_you_said=what_you_said,
+        user_intent=user_intent,
+        recommended_english=recommended_english,
+        issue=issue,
+        why=why,
+        more_natural_option=more_natural_option,
+        score=_overall_score(score_breakdown),
+        score_breakdown=score_breakdown,
+        provider=provider,
+        corrected_sentence=recommended_english,
+        better_expression=more_natural_option,
+        user_intent_zh=user_intent if _contains_chinese(user_intent) else None,
+        code_switching_tip=why if _contains_chinese(what_you_said) else None,
+    )
+
+
+def _clamp_score(value: int) -> int:
+    return max(35, min(98, value))
+
+
+def _overall_score(breakdown: FeedbackScoreBreakdown) -> int:
+    weighted = (
+        breakdown.grammar * 0.25
+        + breakdown.naturalness * 0.30
+        + breakdown.relevance * 0.25
+        + breakdown.clarity * 0.20
+    )
+    return round(weighted)
 
 
 def _scenario_reply(scenario_id: str, user_message: str) -> str:
@@ -379,28 +430,28 @@ def _scenario_completion_score(scenario_id: str, text: str, turn_count: int) -> 
 def _repeated_issues(scenario_id: str) -> list[str]:
     issues = {
         "interview": [
-            "Watch tense consistency when describing past experience.",
-            "Use gerunds after prepositions such as 'responsible for'.",
+            "描述过去经历时，注意时态前后保持一致。",
+            "“responsible for” 后面要接动名词（doing），不要用动词原形。",
         ],
         "restaurant": [
-            "Use polite forms such as 'I'd like' and 'Could I have'.",
-            "Check articles and singular or plural nouns when ordering.",
+            "可以多用 “I'd like”“Could I have” 这类礼貌表达。",
+            "点餐时注意冠词，以及名词的单复数形式。",
         ],
         "ordering_food": [
-            "Use polite forms such as 'I'd like' and 'Could I have'.",
-            "Check articles and singular or plural nouns when ordering.",
+            "可以多用 “I'd like”“Could I have” 这类礼貌表达。",
+            "点餐时注意冠词，以及名词的单复数形式。",
         ],
         "meeting": [
-            "Use articles with workplace nouns such as 'the API'.",
-            "Use 'need someone to do something' for requests.",
+            "“the API” 这类职场名词前别忘了加冠词。",
+            "请求支持时可以用 “need someone to do something” 的句型。",
         ],
         "travel": [
-            "Use polite travel requests such as 'Could you tell me...'.",
-            "Check articles and prepositions in travel phrases.",
+            "可以多用 “Could you tell me...” 这类礼貌的旅行用语。",
+            "注意旅行常用短语里的冠词和介词搭配。",
         ],
         "daily_conversation": [
-            "Use past tense for completed daily activities.",
-            "Add articles before singular countable nouns such as 'a movie'.",
+            "描述已经完成的日常活动时，要用过去时。",
+            "可数名词单数前别忘了加冠词，比如 “a movie”。",
         ],
     }
     return issues.get(scenario_id, issues["interview"])
@@ -444,42 +495,247 @@ def _summary_expressions(scenario_id: str) -> list[str]:
 
 def _next_focus(scenario_id: str) -> str:
     focuses = {
-        "interview": "Practice answering with one concrete example and one measurable result.",
-        "restaurant": "Practice polite ordering phrases and confirming details.",
-        "meeting": "Practice a progress, blocker, and next-step update structure.",
-        "ordering_food": "Practice polite ordering phrases and confirming details.",
-        "travel": "Practice polite travel requests and confirming key details.",
-        "daily_conversation": "Practice adding one detail and one follow-up question in casual English.",
+        "interview": "练习用“一个具体例子 + 一个可衡量的结果”来回答问题。",
+        "restaurant": "练习礼貌的点餐句型，并在最后确认订单细节。",
+        "meeting": "练习“进展 → 阻塞点 → 下一步”这样的汇报结构。",
+        "ordering_food": "练习礼貌的点餐句型，并在最后确认订单细节。",
+        "travel": "练习礼貌的旅行请求句型，并确认关键信息。",
+        "daily_conversation": "练习在闲聊里多加一个细节和一个追问，让对话更自然。",
     }
     return focuses.get(scenario_id, focuses["interview"])
 
 
 def _contains_chinese(text: str) -> bool:
-    return any("\u4e00" <= character <= "\u9fff" for character in text)
+    return any("一" <= character <= "鿿" for character in text)
 
 
-def _mixed_language_intent(message: str) -> str:
+_GENERIC_OPENER_WORDS = {
+    "hi", "hello", "hey", "thanks", "thank", "yes", "no", "ok", "okay", "sure", "sorry",
+}
+_GENERIC_OPENER_PHRASES_ZH = ("你好", "谢谢", "好的", "是的", "嗯", "哈喽", "抱歉")
+
+_SCENARIO_TOPIC_KEYWORDS: dict[str, list[str]] = {
+    "interview": [
+        "experience", "project", "role", "team", "intern", "resume", "interview",
+        "background", "skill", "challenge", "responsible", "graduated",
+        "学习", "项目", "面试", "实习", "经验", "经历",
+    ],
+    "ordering_food": [
+        "order", "menu", "drink", "food", "recommend", "sandwich", "coffee", "takeout",
+        "table", "dish", "allerg", "点", "餐", "推荐", "外卖", "菜", "饮料",
+    ],
+    "meeting": [
+        "progress", "blocker", "update", "task", "deadline", "team", "api", "sync",
+        "meeting", "next step", "schedule", "进度", "会议", "阻塞", "汇报", "预约",
+    ],
+    "travel": [
+        "hotel", "check in", "check-in", "check out", "room", "reservation", "direction",
+        "station", "airport", "ticket", "luggage", "酒店", "入住", "车站", "机场", "行李", "问路",
+    ],
+    "daily_conversation": [
+        "weekend", "movie", "class", "homework", "plan", "friend", "classmate", "coffee",
+        "relax", "recently", "project", "projects", "ai", "周末", "电影", "同学", "计划", "作业",
+        "聊天", "最近", "项目", "应用开发",
+    ],
+}
+
+
+def _is_on_topic(scenario: Scenario, message: str) -> bool:
+    stripped = message.strip()
+    if len(stripped) <= 2:
+        return True
+
+    lowered = stripped.lower()
+    words = set(re.findall(r"[a-z']+", lowered))
+    if words & _GENERIC_OPENER_WORDS:
+        return True
+    if any(phrase in stripped for phrase in _GENERIC_OPENER_PHRASES_ZH):
+        return True
+
+    keywords = _SCENARIO_TOPIC_KEYWORDS.get(scenario.scenario_id, [])
+    return any(keyword in lowered for keyword in keywords)
+
+
+_CHINGLISH_PATTERNS: list[tuple[str, str]] = [
+    ("very like", "really like / like ... a lot"),
+    ("more better", "better"),
+    ("more cheaper", "cheaper"),
+    ("open the light", "turn on the light"),
+    ("close the light", "turn off the light"),
+    ("how to say", "what's the word for / how do you say"),
+    ("give you trouble", "cause you any trouble"),
+    ("i very", "I'm really / I really"),
+    ("discuss about", "discuss"),
+    ("less people", "fewer people"),
+]
+
+
+def _detect_chinglish(message: str) -> list[tuple[str, str]]:
+    lowered = message.lower()
+    return [(pattern, fix) for pattern, fix in _CHINGLISH_PATTERNS if pattern in lowered]
+
+
+_GRAMMAR_PATTERNS: list[tuple[str, str]] = [
+    ("i am graduated", "I graduated"),
+    ("what do you do recently", "What have you been up to recently"),
+    ("i are", "I am"),
+    ("he don't", "he doesn't"),
+    ("she don't", "she doesn't"),
+    ("responsible for make", "responsible for making"),
+    ("recommend me", "recommend ... for me"),
+]
+
+
+def _detect_grammar_issues(message: str) -> list[tuple[str, str]]:
+    lowered = message.lower()
+    return [(pattern, fix) for pattern, fix in _GRAMMAR_PATTERNS if pattern in lowered]
+
+
+def _compose_recommended_english(
+    scenario: Scenario,
+    message: str,
+    has_chinese: bool,
+    grammar_hits: list[tuple[str, str]],
+    chinglish_hits: list[tuple[str, str]],
+) -> str:
+    lowered = message.lower()
+    if "what do you do recently" in lowered:
+        return "What have you been up to recently?"
+    if "recently completed" in lowered and "ai" in lowered and ("项目" in message or "应用开发" in message):
+        return "I recently completed two AI application development projects."
+    if has_chinese:
+        return _translate_mixed_message(scenario, message)
+
+    rewritten = message.strip()
+    for pattern, fix in grammar_hits + chinglish_hits:
+        rewritten = re.sub(re.escape(pattern), fix, rewritten, flags=re.IGNORECASE)
+
+    return _ensure_sentence_punctuation(rewritten)
+
+
+def _translate_mixed_message(scenario: Scenario, message: str) -> str:
     if _mentions_scheduling_meeting(message):
-        return "我想约一个明天的会议。"
-    return message
+        return "I'd like to schedule a meeting for tomorrow, if that works for you."
+    if "ai" in message.lower() and ("项目" in message or "应用开发" in message):
+        return "I recently completed two AI application development projects."
+
+    fragments = _extract_known_fragments(message)
+    stripped = message.strip()
+    is_question = stripped.endswith(("?", "？")) or any(
+        token in stripped for token in ("吗", "呢", "怎么", "什么", "哪")
+    )
+    is_request = any(
+        token in stripped
+        for token in ("我想", "我要", "想要", "麻烦", "可以帮", "帮我", "能不能")
+    )
+
+    if fragments:
+        topic = ", ".join(fragments[:3])
+        if is_question:
+            return f"Could you tell me more about {topic}?"
+        if is_request:
+            return f"I'd like to {topic}, if that's possible."
+        return f"I'd like to talk about {topic} in this conversation."
+
+    return _default_better_expression(scenario.scenario_id)
 
 
-def _mixed_language_expression(scenario_id: str, message: str) -> str:
-    if _mentions_scheduling_meeting(message):
-        return "I want to schedule a meeting for tomorrow."
-    if scenario_id in {"restaurant", "ordering_food"}:
-        return "I'd like to order this, please."
-    if scenario_id == "travel":
-        return "I need help with my travel plans."
-    if scenario_id == "daily_conversation":
-        return "After work, I relaxed at home and watched a movie."
-    return get_scenario_prompt_config(scenario_id).useful_expressions[0]
+_STOP_WORDS = {
+    "i", "a", "an", "the", "to", "is", "am", "are", "of", "in", "on", "and", "for",
+    "it", "you", "we", "my", "me", "this", "that", "with", "at", "be",
+}
+
+_ZH_EN_VOCAB: list[tuple[str, str]] = [
+    ("预约", "schedule"),
+    ("安排", "arrange"),
+    ("会议", "a meeting"),
+    ("明天", "tomorrow"),
+    ("今天", "today"),
+    ("下周", "next week"),
+    ("点餐", "place an order"),
+    ("点单", "place an order"),
+    ("推荐", "a recommendation"),
+    ("菜单", "the menu"),
+    ("打包", "to take it to go"),
+    ("外卖", "a takeout order"),
+    ("入住", "check in"),
+    ("退房", "check out"),
+    ("房间", "a room"),
+    ("预订", "a reservation"),
+    ("怎么走", "how to get there"),
+    ("地铁站", "the subway station"),
+    ("火车站", "the train station"),
+    ("机场", "the airport"),
+    ("项目", "the project"),
+    ("应用开发", "application development"),
+    ("经验", "my experience"),
+    ("实习", "the internship"),
+    ("面试", "the interview"),
+    ("挑战", "a challenge"),
+    ("阻塞", "a blocker"),
+    ("进度", "the progress"),
+    ("汇报", "an update"),
+    ("同学", "my classmate"),
+    ("周末", "the weekend"),
+    ("计划", "plans"),
+    ("电影", "a movie"),
+    ("作业", "homework"),
+    ("咖啡", "coffee"),
+    ("帮我", "help me"),
+]
 
 
-def _code_switching_tip(message: str, expression: str) -> str:
-    if _mentions_scheduling_meeting(message):
-        return f"把“预约一个 meeting”整体换成自然英文：{expression}"
-    return f"先保留你的意思，再把中文部分换成完整英文：{expression}"
+def _extract_known_fragments(message: str) -> list[str]:
+    fragments: list[str] = []
+    seen: set[str] = set()
+
+    for match in re.findall(r"[A-Za-z][A-Za-z'\-]*", message):
+        lowered = match.lower()
+        if lowered in _STOP_WORDS or lowered in seen:
+            continue
+        seen.add(lowered)
+        fragments.append(match)
+
+    for zh, en in _ZH_EN_VOCAB:
+        if zh in message and en.lower() not in seen:
+            seen.add(en.lower())
+            fragments.append(en)
+
+    return fragments
+
+
+def _compose_more_natural_option(scenario: Scenario, recommended_english: str) -> str:
+    base = recommended_english.rstrip(".!?")
+    return f"{base}. {_scenario_connector(scenario.scenario_id)}"
+
+
+def _scenario_connector(scenario_id: str) -> str:
+    connectors = {
+        "interview": "I'd be glad to walk you through the details if that's helpful.",
+        "ordering_food": "If you have a recommendation, I'm happy to hear it.",
+        "meeting": "I can share more specifics if that would help the team.",
+        "travel": "Please let me know if you need any more information from me.",
+        "daily_conversation": "I'd love to hear what you think about it too.",
+    }
+    return connectors.get(scenario_id, connectors["interview"])
+
+
+def _describe_user_intent(scenario: Scenario, message: str, has_chinese: bool) -> str:
+    stripped = message.strip()
+    if has_chinese:
+        return stripped
+    snippet = stripped if len(stripped) <= 60 else f"{stripped[:60]}…"
+    return f"你正在围绕“{scenario.title_zh}”场景表达：{snippet}"
+
+
+def _ensure_sentence_punctuation(text: str) -> str:
+    text = text.strip()
+    if not text:
+        return text
+    text = text[0].upper() + text[1:]
+    if text[-1] not in ".!?":
+        text += "."
+    return text
 
 
 def _summary_code_switching_advice(messages: list[ChatMessage]) -> str | None:

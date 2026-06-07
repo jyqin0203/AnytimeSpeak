@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 from app.schemas import ChatMessage, ChatRequest, FeedbackRequest, SummaryRequest
@@ -6,6 +8,7 @@ from app.schemas import ChatMessage, ChatRequest, FeedbackRequest, SummaryReques
 def _clear_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("LLM_PROVIDER_MODE", "OPENAI_API_KEY", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ANYTIMESPEAK_SKIP_DOTENV", "1")
 
 
 def test_chat_fallback_stays_mock_when_llm_env_is_missing(monkeypatch: pytest.MonkeyPatch):
@@ -24,6 +27,8 @@ def test_chat_fallback_stays_mock_when_llm_env_is_missing(monkeypatch: pytest.Mo
     )
 
     assert response.scenario_id == "restaurant"
+    assert response.provider == "mock"
+    assert response.fallback_reason == "missing_api_key"
     assert response.reply.role == "assistant"
     assert "chicken sandwich" in response.reply.content.lower()
     assert response.quick_feedback.score >= 70
@@ -52,7 +57,9 @@ def test_feedback_falls_back_to_mock_when_llm_call_fails(monkeypatch: pytest.Mon
     assert response.corrected_sentence == (
         "I graduated last year and I was responsible for making the report."
     )
-    assert "simple past" in response.issue.lower()
+    assert "i am graduated" in response.issue.lower()
+    assert "i graduated" in response.issue.lower()
+    assert response.fallback_reason == "llm_request_failed"
 
 
 def test_llm_provider_uses_openai_api_key_env(monkeypatch: pytest.MonkeyPatch):
@@ -95,14 +102,17 @@ def test_llm_provider_uses_openai_api_key_env(monkeypatch: pytest.MonkeyPatch):
     assert response.score == 90
 
 
-def test_llm_provider_defaults_to_qwen_plus_on_alibaba_bailian(monkeypatch: pytest.MonkeyPatch):
+def test_llm_api_key_env_takes_priority_over_openai_key(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
     _clear_llm_env(monkeypatch)
     monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
-    monkeypatch.setenv("LLM_API_KEY", "dashscope-test-key")
+    monkeypatch.setenv("LLM_API_KEY", "llm-test-key")
+    monkeypatch.setenv("OPENAI_API_KEY", "openai-test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    captured_request = {}
+    captured_headers = {}
 
     class FakeResponse:
         def raise_for_status(self):
@@ -120,9 +130,59 @@ def test_llm_provider_defaults_to_qwen_plus_on_alibaba_bailian(monkeypatch: pyte
             }
 
     def fake_post(url, headers, json, timeout):
-        captured_request["url"] = url
-        captured_request["json"] = json
-        captured_request["headers"] = headers
+        captured_headers.update(headers)
+        return FakeResponse()
+
+    monkeypatch.setattr(llm_provider.httpx, "post", fake_post)
+
+    llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="interview", message="I want practice.")
+    )
+
+    assert captured_headers["Authorization"] == "Bearer llm-test-key"
+
+
+def test_llm_provider_loads_project_dotenv_without_printing_secret(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+):
+    import app.llm_provider as llm_provider
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.delenv("ANYTIMESPEAK_SKIP_DOTENV", raising=False)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "LLM_PROVIDER_MODE=llm",
+                "LLM_API_KEY=dotenv-test-key",
+                "LLM_BASE_URL=https://example.test/v1",
+                "LLM_MODEL=demo-model",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(llm_provider, "_dotenv_paths", lambda: [dotenv_path])
+
+    captured_headers = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "content": '{"corrected_sentence":"OK","issue":"说明","better_expression":"OK","score":90}'
+                        }
+                    }
+                ]
+            }
+
+    def fake_post(url, headers, json, timeout):
+        captured_headers.update(headers)
         return FakeResponse()
 
     monkeypatch.setattr(llm_provider.httpx, "post", fake_post)
@@ -131,10 +191,52 @@ def test_llm_provider_defaults_to_qwen_plus_on_alibaba_bailian(monkeypatch: pyte
         FeedbackRequest(scenario_id="interview", message="I want practice.")
     )
 
-    assert captured_request["url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    assert captured_request["json"]["model"] == "qwen-plus"
-    assert captured_request["headers"]["Authorization"] == "Bearer dashscope-test-key"
-    assert response.score == 90
+    assert response.provider == "llm"
+    assert captured_headers["Authorization"] == "Bearer dotenv-test-key"
+
+
+def test_llm_provider_falls_back_when_base_url_is_missing(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="interview", message="I want practice.")
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "missing_base_url"
+
+
+def test_llm_provider_falls_back_when_model_is_missing(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    _clear_llm_env(monkeypatch)
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="interview", message="I want practice.")
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "missing_model"
+
+
+def test_llm_timeout_allows_slow_provider_responses():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.LLM_TIMEOUT_SECONDS >= 90.0
+
+
+def test_llm_provider_info_logs_are_enabled():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.logger.isEnabledFor(logging.INFO)
 
 
 def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.MonkeyPatch):
@@ -176,7 +278,34 @@ def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.
 
     assert response.scenario_id == "meeting"
     assert response.summary == "You handled the meeting clearly."
+    assert response.provider == "llm"
     assert response.scores.overall == 85
+
+
+def test_json_parser_accepts_markdown_code_fence_and_text():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        'Here is the result:\n```json\n{"provider":"llm","score":88}\n```\nThanks.',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_logs_operation_without_response_content(caplog: pytest.LogCaptureFixture):
+    import app.llm_provider as llm_provider
+
+    content = "not-json-sensitive-response"
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(llm_provider.LLMResponseParseError):
+            llm_provider._json_from_llm(content, "summary")
+
+    assert "parse_failed" in caplog.text
+    assert "operation=summary" in caplog.text
+    assert f"response_length={len(content)}" in caplog.text
+    assert content not in caplog.text
 
 
 def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
@@ -185,17 +314,24 @@ def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
     messages = llm_provider._chat_prompt(
         ChatRequest(
             scenario_id="travel",
-            messages=[ChatMessage(role="user", content="我想 check in early.")],
+            latest_user_message="我想 check in early.",
+            conversation_history=[
+                ChatMessage(role="assistant", content="Hello! How can I help you with your trip today?"),
+            ],
         )
     )
     prompt_text = "\n".join(message["content"] for message in messages)
 
+    assert "story" in prompt_text.lower()
     assert "Travel service representative or helpful local guide" in prompt_text
     assert "Traveler" in prompt_text
     assert "Ask for directions or travel information" in prompt_text
     assert "clear, patient, and practical" in prompt_text.lower()
+    assert "Previous conversation" in prompt_text
+    assert "Latest user message: 我想 check in early." in prompt_text
     assert "Chinese-English mixed input" in prompt_text
-    assert "continue the conversation naturally" in prompt_text
+    assert "ask exactly one specific clarifying question" in prompt_text
+    assert "gently steer the conversation back" in prompt_text
 
 
 def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanations():
@@ -204,14 +340,20 @@ def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanati
     messages = llm_provider._feedback_prompt(
         FeedbackRequest(
             scenario_id="meeting",
-            message="I want to 预约一个 meeting tomorrow.",
+            latest_user_message="I want to 预约一个 meeting tomorrow.",
+            conversation_history=[
+                ChatMessage(role="user", content="This older turn should not be graded."),
+            ],
         )
     )
     prompt_text = "\n".join(message["content"] for message in messages)
 
     assert "Team lead" in prompt_text
-    assert "user_intent_zh" in prompt_text
-    assert "code_switching_tip" in prompt_text
+    assert "Base your analysis strictly on the latest user message" in prompt_text
+    assert "This older turn should not be graded" in prompt_text
+    assert "what_you_said" in prompt_text
+    assert "recommended_english" in prompt_text
+    assert "score_breakdown must contain integer fields grammar, naturalness, relevance" in prompt_text
     assert "中文" in prompt_text
     assert "不要羞辱用户" in prompt_text
 
@@ -222,7 +364,7 @@ def test_summary_prompt_uses_goal_scoring_focus_and_code_switching_summary():
     messages = llm_provider._summary_prompt(
         SummaryRequest(
             scenario_id="daily_conversation",
-            messages=[
+            conversation_history=[
                 ChatMessage(role="user", content="Today is good."),
                 ChatMessage(role="user", content="我 after work watch movie."),
             ],
@@ -248,12 +390,20 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     def fake_chat_completion(messages):
         return """
         {
-          "corrected_sentence": "I want to schedule a meeting tomorrow.",
-          "issue": "你想表达预约会议，核心意思很清楚。",
-          "better_expression": "I'd like to schedule a meeting for tomorrow.",
-          "user_intent_zh": "我想约一个明天的会议。",
-          "code_switching_tip": "把“预约一个 meeting”整体换成 schedule a meeting。",
-          "score": 82
+          "what_you_said": "I want to 预约一个 meeting tomorrow.",
+          "user_intent": "我想约一个明天的会议。",
+          "recommended_english": "I want to schedule a meeting tomorrow.",
+          "issue": "中英混合表达可以理解，但需要换成完整英文。",
+          "why": "schedule a meeting 是自然的会议预约表达。",
+          "more_natural_option": "I'd like to schedule a meeting for tomorrow.",
+          "score": 82,
+          "score_breakdown": {
+            "grammar": 80,
+            "expression": 82,
+            "fluency": 84,
+            "scenario_fit": 86
+          },
+          "provider": "llm"
         }
         """
 
@@ -262,9 +412,12 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     response = llm_provider.create_feedback_with_fallback(
         FeedbackRequest(
             scenario_id="meeting",
-            message="I want to 预约一个 meeting tomorrow.",
+            latest_user_message="I want to 预约一个 meeting tomorrow.",
         )
     )
 
-    assert response.user_intent_zh == "我想约一个明天的会议。"
-    assert "schedule a meeting" in response.code_switching_tip
+    assert response.what_you_said == "I want to 预约一个 meeting tomorrow."
+    assert response.user_intent == "我想约一个明天的会议。"
+    assert response.recommended_english == "I want to schedule a meeting tomorrow."
+    assert "schedule a meeting" in response.why
+    assert response.provider == "llm"

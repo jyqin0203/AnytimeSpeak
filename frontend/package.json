@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "test:provider-status": "node --test --experimental-strip-types tests/providerStatus.test.ts",
     "preview": "vite preview"
   },
   "dependencies": {

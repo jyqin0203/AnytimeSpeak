@@ -41,7 +41,7 @@ export function VoiceControls({ input, output, sampleText, language, onLanguageC
         <div>
           <span>麦克风优先</span>
           <strong className={isActive ? "recording" : ""}>{inputStatus}</strong>
-          <p>{isSending ? "正在发送到后端 mock coaching API..." : outputStatus}</p>
+          <p>{isSending ? "正在发送到后端 coaching API..." : outputStatus}</p>
         </div>
       </div>
 
