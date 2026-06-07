@@ -97,7 +97,7 @@ export function useSpeechInput({
         onResult: (result) => {
           if (result.providerId === "doubao-asr") {
             const nextTranscript = result.transcript.trim();
-            const nextFinalTranscript = result.finalTranscript.trim();
+            const nextFinalTranscript = result.isFinal ? nextTranscript : result.finalTranscript.trim();
             finalTranscriptRef.current = nextFinalTranscript;
             setState((current) => ({
               ...current,

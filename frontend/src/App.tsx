@@ -192,7 +192,7 @@ function App() {
   };
 
   const sendText = useCallback(
-    async (rawText: string, recording?: VoiceRecording | null) => {
+    async (rawText: string, recording?: VoiceRecording | null, inputMode: "text" | "voice" = "text") => {
       const text = rawText.trim();
       if (!text || sendStatus === "loading") return;
 
@@ -225,20 +225,20 @@ function App() {
       if (feedbackResult.status === "fulfilled") {
         const feedbackForTurn: Feedback = {
           ...feedbackResult.value,
-          pronunciationInputMode: recording ? "voice" : "text",
+          pronunciationInputMode: inputMode,
         };
         setFeedback((current) => [...current, feedbackForTurn]);
         setFeedbackStatus("idle");
-        if (recording) {
+        if (inputMode === "voice") {
           void assessPronunciation({
             scenario: selected,
             sessionId,
             userMessage: userMessage.text,
             transcript: userMessage.text,
             referenceText: feedbackResult.value.recommendedEnglish,
-            audioDurationMs: recording.durationMs,
+            audioDurationMs: recording?.durationMs,
             recognizedLanguage: "en-US",
-            audio: recording.blob,
+            audio: recording?.blob ?? null,
           })
             .then((pronunciation) => {
               setFeedback((current) =>
@@ -276,12 +276,12 @@ function App() {
 
   const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void sendText(input);
+    void sendText(input, null, "text");
   };
 
   const submitVoiceText = (text: string, recording?: VoiceRecording | null) => {
     if (!text || sendStatus === "loading") return;
-    void sendText(text, recording);
+    void sendText(text, recording, "voice");
   };
 
   const trySaveHistory = async (user: AuthUser, payload: Omit<SaveHistoryPayload, "userId">) => {
