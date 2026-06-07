@@ -1222,10 +1222,6 @@ function Practice({
                   <p>{latestFeedback.whatYouSaid}</p>
                 </div>
                 <div>
-                  <span>你想表达的是</span>
-                  <p>{latestFeedback.userIntent}</p>
-                </div>
-                <div>
                   <span>推荐英文表达</span>
                   <p className="english-suggestion">{latestFeedback.recommendedEnglish}</p>
                 </div>
@@ -1285,7 +1281,7 @@ function Summary({
     <section className="summary-layout page-section">
       <div className="summary-hero">
         <span>{scenario.title} · 课后总结</span>
-        <h1>{summary.scores.综合}</h1>
+        <h1>{status === "loading" ? "—" : summary.scores.综合}</h1>
         <p className="summary-provider-line">
           总体评价：{status === "loading" ? "正在生成课后总结和评分..." : summary.overallPerformance}
           <span className={`provider-badge ${summary.provider === "llm" ? "llm" : "fallback"}`}>
@@ -1311,10 +1307,10 @@ function Summary({
           <article className="score-row" key={label}>
             <div>
               <span>{label}</span>
-              <strong>{value}</strong>
+              <strong>{status === "loading" ? "—" : value}</strong>
             </div>
             <div className="score-track" aria-hidden="true">
-              <span style={{ width: `${value}%` }} />
+              <span style={{ width: status === "loading" ? "0%" : `${value}%` }} />
             </div>
           </article>
         ))}

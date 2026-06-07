@@ -253,7 +253,7 @@ export async function startPracticeSession(scenario: Scenario): Promise<Practice
     storySeedId: response.story_seed_id,
     storyIntroZh: response.story_intro_zh,
     storyIntroEn: response.story_intro_en,
-    openingMessage: response.opening_message,
+    openingMessage: sanitizeAiText(response.opening_message),
     messages: response.messages.map(fromApiMessage),
     createdAt: response.created_at,
   };
@@ -276,7 +276,7 @@ export async function sendChatMessage(
   });
 
   return {
-    message: { id: Date.now() + 1, sender: "ai", text: response.reply.content },
+    message: { id: Date.now() + 1, sender: "ai", text: sanitizeAiText(response.reply.content) },
     provider: response.provider ?? response.quick_feedback?.provider ?? "mock",
     fallbackReason: response.fallback_reason ?? response.quick_feedback?.fallback_reason ?? null,
   };
@@ -302,10 +302,10 @@ export async function fetchTurnFeedback(
     id: message.id,
     whatYouSaid: response.what_you_said,
     userIntent: response.user_intent,
-    recommendedEnglish: response.recommended_english,
-    issue: response.issue,
-    why: response.why,
-    moreNaturalOption: response.more_natural_option,
+    recommendedEnglish: sanitizeAiText(response.recommended_english),
+    issue: sanitizeAiText(response.issue),
+    why: sanitizeAiText(response.why),
+    moreNaturalOption: sanitizeAiText(response.more_natural_option),
     score: response.score,
     scoreBreakdown: {
       "语法": response.score_breakdown.grammar,
@@ -370,6 +370,14 @@ export function createLocalSummary(messages: Message[], feedback: Feedback[]): S
     provider: "local-fallback",
     fallbackReason: "frontend_api_unavailable",
   };
+}
+
+function sanitizeAiText(text: string): string {
+  return text
+    .replace(/—|―/g, " - ") // em dash → spaced hyphen
+    .replace(/–/g, "-")           // en dash → hyphen
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 function toApiMessages(messages: Message[]): ApiChatMessage[] {

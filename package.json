@@ -1,0 +1,9 @@
+{
+  "name": "anytimespeak",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "scripts\\dev.bat",
+    "stop": "scripts\\stop-dev.bat"
+  }
+}
