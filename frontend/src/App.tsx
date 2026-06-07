@@ -303,7 +303,7 @@ function App() {
     }
   };
 
-  const handleAuth = async (mode: "login" | "register", username: string, password: string) => {
+  const handleAuth = async (mode: "login" | "register", username: string, password: string): Promise<string | null> => {
     let nextUser: AuthUser | null = null;
     try {
       const user = mode === "register" ? await registerUser(username, password) : await loginUser(username, password);
@@ -312,8 +312,9 @@ function App() {
       setShowProfileModal(false);
       nextUser = user;
     } catch {
-      setHistorySaveNote(mode === "register" ? "注册失败，请换一个用户名或稍后再试。" : "登录失败，请检查用户名和密码。");
-      return;
+      const message = mode === "register" ? "注册失败：用户名可能已存在，或后端服务暂不可用。" : "登录失败：请检查用户名、密码，或确认后端服务正在运行。";
+      setHistorySaveNote(message);
+      return message;
     }
 
     const pending = pendingHistoryRef.current;
@@ -326,6 +327,7 @@ function App() {
         setHistorySaveNote("登录成功，但本次历史记录保存失败。请稍后再试。");
       }
     }
+    return null;
   };
 
   return (
@@ -383,7 +385,7 @@ function App() {
 
       {showProfileModal && (
         <ProfileModal
-          onConfirm={(mode, username, password) => void handleAuth(mode, username, password)}
+          onConfirm={handleAuth}
           onClose={() => setShowProfileModal(false)}
         />
       )}
@@ -460,16 +462,29 @@ function ProfileModal({
   onConfirm,
   onClose,
 }: {
-  onConfirm: (mode: "login" | "register", username: string, password: string) => void;
+  onConfirm: (mode: "login" | "register", username: string, password: string) => Promise<string | null>;
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [status, setStatus] = useState<"idle" | "submitting">("idle");
+  const [error, setError] = useState<string | null>(null);
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const trimmed = username.trim();
-    if (trimmed && password.length >= 6) onConfirm(mode, trimmed, password);
+    if (!trimmed || password.length < 6 || status === "submitting") return;
+
+    setStatus("submitting");
+    setError(null);
+    void onConfirm(mode, trimmed, password)
+      .then((message) => {
+        if (message) setError(message);
+      })
+      .catch(() => {
+        setError("请求失败：请确认后端服务正在运行。");
+      })
+      .finally(() => setStatus("idle"));
   };
 
   return (
@@ -478,10 +493,24 @@ function ProfileModal({
         <h2>{mode === "login" ? "登录练习档案" : "创建练习档案"}</h2>
         <p>使用用户名和密码保存练习历史。退出后重新登录，也可以继续查看自己的记录。</p>
         <div className="auth-mode-row">
-          <button className={mode === "login" ? "active" : ""} type="button" onClick={() => setMode("login")}>
+          <button
+            className={mode === "login" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setMode("login");
+              setError(null);
+            }}
+          >
             登录
           </button>
-          <button className={mode === "register" ? "active" : ""} type="button" onClick={() => setMode("register")}>
+          <button
+            className={mode === "register" ? "active" : ""}
+            type="button"
+            onClick={() => {
+              setMode("register");
+              setError(null);
+            }}
+          >
             注册
           </button>
         </div>
@@ -504,9 +533,14 @@ function ProfileModal({
             type="password"
             maxLength={128}
           />
+          {error && <p className="modal-error">{error}</p>}
           <div className="modal-actions">
-            <button className="primary-button" type="submit" disabled={!username.trim() || password.length < 6}>
-              {mode === "login" ? "登录" : "注册并登录"}
+            <button
+              className="primary-button"
+              type="submit"
+              disabled={!username.trim() || password.length < 6 || status === "submitting"}
+            >
+              {status === "submitting" ? "处理中..." : mode === "login" ? "登录" : "注册并登录"}
             </button>
             <button className="secondary-button" type="button" onClick={onClose}>
               取消
