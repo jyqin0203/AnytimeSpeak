@@ -223,7 +223,25 @@ Current status: merged into `main`.
 - Login/profile chip and History button in the topbar.
 - Score panel shows an empty placeholder before the first turn instead of a hardcoded score.
 
-## PR 14: README, Screenshots, and Demo Video Script
+## PR 14: Practice UI/UX Improvements
+
+Branch: `fix/practice-ui-summary-placeholder`
+
+Current status: pushed, pending merge.
+
+- Fixed practice page layout to use a fixed viewport-height grid so the conversation, mic button, and end button are all visible without scrolling.
+- Replaced the large `VoiceControls` block with a compact single-row chat composer: text input + small mic button + send button.
+- Removed the language toggle (中英混合 / English) and the "改用文字输入" collapsible section.
+- Removed the "你想表达的是" redundant section from the per-turn feedback card.
+- Compacted the coach-score badge to a small inline label; removed the explanatory copy.
+- Post-session summary shows `—` while scores are loading instead of a fallback number.
+- AI reply text is sanitized to remove em dashes before display (user input is untouched).
+- Scenario difficulty levels and `feedback_focus` tags are normalized and displayed in Chinese across all modes.
+- Scenarios are sorted by level with beginner (`入门`) scenarios first.
+- Applied UI polish: consistent transitions, hover/focus states, mic pulse animation, `text-wrap: balance` on headings, `prefers-reduced-motion` support.
+- Fixed homepage title wrapping at full-screen widths.
+
+## PR 15: README, Screenshots, and Demo Video Script
 
 Current status: still needed for final submission materials. Do not add a demo video link until a real accessible link exists.
 
@@ -234,6 +252,5 @@ Current status: still needed for final submission materials. Do not add a demo v
 
 ## Recommended Follow-Up PRs
 
-- `fix: improve practice layout and demo usability`
 - `feat: add streaming ASR provider`
 - `docs: finalize submission materials`

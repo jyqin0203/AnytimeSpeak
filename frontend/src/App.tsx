@@ -34,7 +34,6 @@ import {
   type HistorySessionItem,
   type SaveHistoryPayload,
 } from "./api/history";
-import { VoiceControls } from "./components/VoiceControls";
 import {
   providerBadgeText,
   providerStatusText,
@@ -1013,7 +1012,6 @@ function Practice({
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestFeedback = feedback[feedback.length - 1];
   const latestScore = latestFeedback?.score ?? null;
-  const [speechLanguage, setSpeechLanguage] = useState("zh-CN");
   const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
   const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
   const lastSpokenAiId = useRef<number | null>(null);
@@ -1022,7 +1020,7 @@ function Practice({
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
   const voiceRecorder = useVoiceRecorder();
   const speechInput = useSpeechInput({
-    lang: speechLanguage,
+    lang: "en-US",
     interimResults: true,
     continuous: true,
     onTranscriptChange: (transcript) => {
@@ -1030,6 +1028,7 @@ function Practice({
       onInput(transcript);
     },
   });
+  const isRecording = speechInput.isListening || speechInput.isRestarting;
 
   useEffect(() => {
     if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
@@ -1158,40 +1157,36 @@ function Practice({
             );
           })}
         </div>
-        <VoiceControls
-          input={speechInput}
-          output={speechOutput}
-          sampleText={latestAiText}
-          language={speechLanguage}
-          onLanguageChange={setSpeechLanguage}
-          onToggleListening={toggleVoiceInput}
-          isSending={sendStatus === "loading"}
-          recorderError={voiceRecorder.error?.message ?? null}
-        />
-        <details className="text-fallback">
-          <summary>改用文字输入</summary>
-          <form className="composer" onSubmit={onSend}>
-            <label htmlFor="practice-input">你的英文回答</label>
-            <div>
-              <input
-                id="practice-input"
-                value={input}
-                onChange={(event) => onInput(event.target.value)}
-                placeholder="例如：I finished the homepage and need help with tests."
-              />
-              <button className="primary-button" type="submit" disabled={sendStatus === "loading"}>
-                {sendStatus === "loading" ? "发送中..." : "发送"}
-              </button>
-            </div>
-          </form>
-        </details>
+        <form className="chat-composer" onSubmit={onSend}>
+          <input
+            id="practice-input"
+            className="chat-input"
+            value={input}
+            onChange={(e) => onInput(e.target.value)}
+            placeholder={isRecording ? "聆听中，再点一次停止并发送..." : "输入回答，或点击右侧麦克风说话"}
+            disabled={sendStatus === "loading"}
+            autoComplete="off"
+          />
+          <button
+            className={`mic-btn${isRecording ? " recording" : ""}`}
+            type="button"
+            onClick={toggleVoiceInput}
+            disabled={!speechInput.isSupported || sendStatus === "loading"}
+            title={isRecording ? "停止录音并发送" : "开始语音输入"}
+            aria-label={isRecording ? "停止录音并发送" : "开始语音输入"}
+          >
+            <span className="microphone-icon" aria-hidden="true"><span /></span>
+          </button>
+          <button className="primary-button" type="submit" disabled={sendStatus === "loading" || (!input.trim() && !isRecording)}>
+            {sendStatus === "loading" ? "..." : "发送"}
+          </button>
+        </form>
       </div>
 
       <aside className="feedback-panel">
         <div className="coach-score">
-          <span>本轮表现</span>
+          <span>本轮</span>
           <strong>{latestScore !== null ? latestScore : "—"}</strong>
-          <p>{latestScore !== null ? "反馈放在旁边累积，不打断对话主线。" : "发送第一句话后，这里会显示本轮评分。"}</p>
         </div>
         <div className="panel-title compact">
           <h2>即时反馈</h2>
@@ -1220,10 +1215,6 @@ function Practice({
                 <div>
                   <span>你刚才说的是</span>
                   <p>{latestFeedback.whatYouSaid}</p>
-                </div>
-                <div>
-                  <span>你想表达的是</span>
-                  <p>{latestFeedback.userIntent}</p>
                 </div>
                 <div>
                   <span>推荐英文表达</span>
@@ -1285,7 +1276,7 @@ function Summary({
     <section className="summary-layout page-section">
       <div className="summary-hero">
         <span>{scenario.title} · 课后总结</span>
-        <h1>{summary.scores.综合}</h1>
+        <h1>{status === "loading" ? "—" : summary.scores.综合}</h1>
         <p className="summary-provider-line">
           总体评价：{status === "loading" ? "正在生成课后总结和评分..." : summary.overallPerformance}
           <span className={`provider-badge ${summary.provider === "llm" ? "llm" : "fallback"}`}>
@@ -1311,10 +1302,10 @@ function Summary({
           <article className="score-row" key={label}>
             <div>
               <span>{label}</span>
-              <strong>{value}</strong>
+              <strong>{status === "loading" ? "—" : value}</strong>
             </div>
             <div className="score-track" aria-hidden="true">
-              <span style={{ width: `${value}%` }} />
+              <span style={{ width: status === "loading" ? "0%" : `${value}%` }} />
             </div>
           </article>
         ))}

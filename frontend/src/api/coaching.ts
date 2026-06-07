@@ -139,6 +139,30 @@ const REQUEST_TIMEOUTS_MS: Record<string, number> = {
 
 export const localScenarios: Scenario[] = [
   {
+    id: "restaurant",
+    scenarioId: "ordering_food",
+    title: "餐厅点餐",
+    englishTitle: "Ordering Food",
+    description: "从询问推荐到确认偏好，练习礼貌、清楚的日常服务场景表达。",
+    aiRole: "餐厅服务员",
+    userRole: "顾客",
+    goal: "点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
+    storySeedId: "ordering_cafe",
+    storyIntroZh: "午餐时间你走进一家有点忙的咖啡店。队伍在往前移动，你需要礼貌地询问推荐、说明偏好，并确认最终点单。",
+    storyIntroEn:
+      "It's lunchtime and you walk into a slightly busy cafe. The line is moving forward, so you need to politely ask for recommendations, explain your preferences, and confirm your final order.",
+    level: "入门",
+    duration: "6 分钟",
+    focus: ["礼貌请求", "偏好说明", "订单确认"],
+    usefulExpressions: ["I'd like...", "Could I have...", "Does this come with..."],
+    openingLine: "Welcome! Are you ready to order, or would you like a few recommendations first?",
+    replies: [
+      "Of course. Our grilled salmon is popular today. Do you have any allergies or preferences?",
+      "Great choice. Would you like that with rice, salad, or roasted vegetables?",
+      "Perfect. I will place that order for you. Would you like anything to drink?",
+    ],
+  },
+  {
     id: "interview",
     scenarioId: "interview",
     title: "面试沟通",
@@ -161,30 +185,6 @@ export const localScenarios: Scenario[] = [
       "Thanks for sharing that. Can you describe one project where you made a clear impact?",
       "That sounds useful. What challenge did you face, and how did you handle it?",
       "Good example. Before we finish, what would you like to know about the team or role?",
-    ],
-  },
-  {
-    id: "restaurant",
-    scenarioId: "ordering_food",
-    title: "餐厅点餐",
-    englishTitle: "Ordering Food",
-    description: "从询问推荐到确认偏好，练习礼貌、清楚的日常服务场景表达。",
-    aiRole: "餐厅服务员",
-    userRole: "顾客",
-    goal: "点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
-    storySeedId: "ordering_cafe",
-    storyIntroZh: "午餐时间你走进一家有点忙的咖啡店。队伍在往前移动，你需要礼貌地询问推荐、说明偏好，并确认最终点单。",
-    storyIntroEn:
-      "It's lunchtime and you walk into a slightly busy cafe. The line is moving forward, so you need to politely ask for recommendations, explain your preferences, and confirm your final order.",
-    level: "入门",
-    duration: "6 分钟",
-    focus: ["礼貌请求", "偏好说明", "订单确认"],
-    usefulExpressions: ["I'd like...", "Could I have...", "Does this come with..."],
-    openingLine: "Welcome! Are you ready to order, or would you like a few recommendations first?",
-    replies: [
-      "Of course. Our grilled salmon is popular today. Do you have any allergies or preferences?",
-      "Great choice. Would you like that with rice, salad, or roasted vegetables?",
-      "Perfect. I will place that order for you. Would you like anything to drink?",
     ],
   },
   {
@@ -213,11 +213,69 @@ export const localScenarios: Scenario[] = [
   },
 ];
 
+const LEVEL_ZH: Record<string, string> = {
+  // single words
+  beginner: "入门", elementary: "入门", basic: "入门",
+  intermediate: "进阶", medium: "进阶",
+  advanced: "高级", expert: "高级", proficient: "高级",
+  // compound phrases from backend catalog
+  "beginner to intermediate": "入门",
+  "intermediate to upper-intermediate": "进阶",
+  "intermediate to advanced": "进阶",
+  "upper-intermediate": "进阶",
+  "upper-intermediate to advanced": "高级",
+};
+
+const FOCUS_ZH: Record<string, string> = {
+  // grammar
+  "tense consistency": "时态一致",
+  "subject-verb agreement": "主谓一致",
+  "article usage": "冠词用法",
+  "articles": "冠词",
+  "countable nouns": "可数名词",
+  "modal verbs": "情态动词",
+  "polite modal verbs": "礼貌情态动词",
+  "present perfect": "现在完成时",
+  "past tense": "过去时",
+  "future plans": "将来时表达",
+  "prepositions": "介词",
+  "common prepositions": "常用介词",
+  "prepositions of place and time": "时间地点介词",
+  "word order": "语序",
+  "basic sentence structure": "基础句式",
+  "tense use": "时态使用",
+  // expression
+  "professional wording": "专业措辞",
+  "structured answers": "结构化回答",
+  "professional update phrases": "职场更新用语",
+  "clear requests": "清晰请求",
+  "natural ordering phrases": "自然点餐用语",
+  "polite question forms": "礼貌疑问句",
+  "question forms": "疑问句形式",
+  "travel vocabulary": "旅行词汇",
+  "clear problem descriptions": "清晰问题描述",
+  "natural small talk": "日常闲聊",
+};
+
+function normalizeLevel(raw: string): string {
+  return LEVEL_ZH[raw.toLowerCase()] ?? raw;
+}
+
+function normalizeFocus(tag: string): string {
+  return FOCUS_ZH[tag.toLowerCase()] ?? tag;
+}
+
+const LEVEL_ORDER: Record<string, number> = { "入门": 0, "进阶": 1, "高级": 2 };
+
+function levelOrder(level: string): number {
+  return LEVEL_ORDER[level] ?? 99;
+}
+
 export async function fetchScenarios(): Promise<Scenario[]> {
   const apiScenarios = await request<ApiScenario[]>("/api/scenarios");
   const localById = new Map(localScenarios.map((scenario) => [scenario.id, scenario]));
 
-  return apiScenarios.map((scenario) => {
+  const mapped = apiScenarios.map((scenario) => {
     const local = localById.get(scenario.id);
     return {
       id: scenario.id,
@@ -231,14 +289,15 @@ export async function fetchScenarios(): Promise<Scenario[]> {
       storySeedId: scenario.story_seed_id,
       storyIntroZh: scenario.story_intro_zh,
       storyIntroEn: scenario.story_intro_en,
-      level: local?.level ?? scenario.level,
+      level: local?.level ?? normalizeLevel(scenario.level),
       duration: local?.duration ?? "8 分钟",
-      focus: local?.focus ?? scenario.feedback_focus,
+      focus: local?.focus ?? scenario.feedback_focus.map(normalizeFocus),
       usefulExpressions: scenario.useful_expressions,
       openingLine: scenario.opening_message ?? scenario.opening_line,
       replies: local?.replies ?? [scenario.opening_line],
     };
   });
+  return mapped.sort((a, b) => levelOrder(a.level) - levelOrder(b.level));
 }
 
 export async function startPracticeSession(scenario: Scenario): Promise<PracticeSession> {
@@ -253,7 +312,7 @@ export async function startPracticeSession(scenario: Scenario): Promise<Practice
     storySeedId: response.story_seed_id,
     storyIntroZh: response.story_intro_zh,
     storyIntroEn: response.story_intro_en,
-    openingMessage: response.opening_message,
+    openingMessage: sanitizeAiText(response.opening_message),
     messages: response.messages.map(fromApiMessage),
     createdAt: response.created_at,
   };
@@ -276,7 +335,7 @@ export async function sendChatMessage(
   });
 
   return {
-    message: { id: Date.now() + 1, sender: "ai", text: response.reply.content },
+    message: { id: Date.now() + 1, sender: "ai", text: sanitizeAiText(response.reply.content) },
     provider: response.provider ?? response.quick_feedback?.provider ?? "mock",
     fallbackReason: response.fallback_reason ?? response.quick_feedback?.fallback_reason ?? null,
   };
@@ -302,10 +361,10 @@ export async function fetchTurnFeedback(
     id: message.id,
     whatYouSaid: response.what_you_said,
     userIntent: response.user_intent,
-    recommendedEnglish: response.recommended_english,
-    issue: response.issue,
-    why: response.why,
-    moreNaturalOption: response.more_natural_option,
+    recommendedEnglish: sanitizeAiText(response.recommended_english),
+    issue: sanitizeAiText(response.issue),
+    why: sanitizeAiText(response.why),
+    moreNaturalOption: sanitizeAiText(response.more_natural_option),
     score: response.score,
     scoreBreakdown: {
       "语法": response.score_breakdown.grammar,
@@ -370,6 +429,14 @@ export function createLocalSummary(messages: Message[], feedback: Feedback[]): S
     provider: "local-fallback",
     fallbackReason: "frontend_api_unavailable",
   };
+}
+
+function sanitizeAiText(text: string): string {
+  return text
+    .replace(/—|―/g, " - ") // em dash → spaced hyphen
+    .replace(/–/g, "-")           // en dash → hyphen
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 function toApiMessages(messages: Message[]): ApiChatMessage[] {

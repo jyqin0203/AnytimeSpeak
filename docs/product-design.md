@@ -8,13 +8,17 @@ The MVP is designed for a course demo: it should be stable, easy to understand, 
 
 ## Current Product Direction
 
-- Chinese-first UI for navigation, instructions, feedback labels, and demo guidance.
+- Chinese-first UI for navigation, instructions, feedback labels, scenario difficulty tags, and focus tags.
 - English-first practice content for role-play replies, recommended expressions, and reusable phrases.
 - Session-based scenario coaching rather than isolated single-message chat.
 - Static story seeds for each scenario so every session starts with a concrete context.
 - Latest-turn feedback that corrects the most recent user message without re-scoring the whole dialogue.
 - Score breakdowns for per-turn feedback and post-session review.
-- Voice as the main practice entry where supported, with text input as the stable fallback.
+- Fixed viewport-height practice layout so conversation, voice input, and end button are always visible without scrolling.
+- Compact single-row chat composer: text input on the left, small mic button on the right, send button.
+- Voice input in English (`en-US`) only; no language toggle.
+- AI reply text sanitized to remove em dashes before display.
+- Scenarios sorted by difficulty level with beginner (`入门`) first.
 - AI reply auto-play through browser speech synthesis when supported.
 - User recording replay through browser recording APIs.
 - Backend LLM provider mode with deterministic mock fallback.
@@ -22,17 +26,17 @@ The MVP is designed for a course demo: it should be stable, easy to understand, 
 ## Current User Flow
 
 1. Open the app.
-2. Optionally create or select a lightweight practice profile when Guest Profile is available.
-3. Choose a practice scenario.
+2. Optionally log in or register from the topbar.
+3. Choose a practice scenario (sorted beginner first).
 4. Read the Chinese story intro and the English story intro for the selected seed.
 5. Start the session-based conversation.
-6. Speak or type English input.
-7. Receive an AI role-play reply; playback may start automatically when supported.
+6. Speak or type English input in the chat composer; mic button starts/stops voice input.
+7. Receive an AI role-play reply (sanitized text; playback may start automatically when supported).
 8. Review latest-turn feedback with recommended English, issue explanation, and score breakdown.
 9. Replay the user's own recording when available.
 10. End the session.
-11. Review summary, corrections, suggestions, provider label, and scores.
-12. Optionally review saved practice history when Practice History is available and stable.
+11. Review summary — scores show `—` while loading, then display the final values.
+12. Optionally review saved practice history in `练习历史`.
 
 ## Scenario Design
 
@@ -137,21 +141,16 @@ Text input is always available. It is the required stable fallback and ensures t
 
 ## Profile And History
 
-Guest Profile and Practice History are demo-enhancement features, not replacements for the core coaching loop.
+Practice history is implemented and available on `main`.
 
-Current `main` status:
+Current status:
 
-- Guest Profile is planned / in progress outside current `main`.
-- Practice History with SQLite is planned / in progress outside current `main`.
-- Current coaching sessions are kept in backend memory for the active practice flow.
-- SQLite database files are local runtime artifacts and must stay ignored.
-
-Intended PR13 behavior:
-
-- Guest users create a lightweight nickname profile, with no password or OAuth.
-- Completed sessions can be saved with messages, feedback, summary, scores, and provider.
-- History list and detail views help users review past practice.
-- If save reliability is not fully verified, history should be treated as an optional demo step.
+- Username/password registration and login from the topbar.
+- Completed sessions auto-saved after each practice ends (messages, feedback, summary, scores, provider label).
+- `练习历史` list and session detail views.
+- If save fails, the completed session remains in frontend state as a pending save; summary page shows a fallback note.
+- Passwords are stored with salted PBKDF2 hashes, never as plaintext.
+- SQLite database file (`backend/data/anytimespeak.db`) is a local runtime artifact, not committed.
 
 ## Future Optimization
 
