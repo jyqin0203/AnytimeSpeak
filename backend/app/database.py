@@ -68,6 +68,7 @@ def init_db() -> None:
         _migrate_legacy_users_table(conn)
         conn.executescript(_CREATE_TABLES_SQL)
         _ensure_practice_session_columns(conn)
+        _repair_practice_session_user_fk(conn)
 
 
 def _migrate_legacy_users_table(conn: sqlite3.Connection) -> None:
@@ -127,3 +128,51 @@ def _ensure_practice_session_columns(conn: sqlite3.Connection) -> None:
     for column, sql in migrations.items():
         if column not in columns:
             conn.execute(sql)
+
+
+def _repair_practice_session_user_fk(conn: sqlite3.Connection) -> None:
+    table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'practice_sessions'"
+    ).fetchone()
+    if table is None:
+        return
+
+    foreign_keys = conn.execute("PRAGMA foreign_key_list(practice_sessions)").fetchall()
+    user_fk_targets = [row["table"] for row in foreign_keys if row["from"] == "user_id"]
+    if user_fk_targets == ["users"]:
+        return
+
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute(
+        """CREATE TABLE practice_sessions_rebuilt (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            session_id TEXT NOT NULL UNIQUE,
+            scenario_id TEXT NOT NULL,
+            scenario_title TEXT NOT NULL,
+            story_intro TEXT,
+            story_intro_zh TEXT,
+            story_intro_en TEXT,
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            score INTEGER,
+            overall_score INTEGER,
+            summary TEXT,
+            summary_json TEXT,
+            provider TEXT NOT NULL DEFAULT 'mock',
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )"""
+    )
+    conn.execute(
+        """INSERT INTO practice_sessions_rebuilt
+           (id, user_id, session_id, scenario_id, scenario_title,
+            story_intro, story_intro_zh, story_intro_en, started_at, ended_at,
+            score, overall_score, summary, summary_json, provider)
+           SELECT id, user_id, session_id, scenario_id, scenario_title,
+                  story_intro, story_intro_zh, story_intro_en, started_at, ended_at,
+                  score, overall_score, summary, summary_json, provider
+           FROM practice_sessions"""
+    )
+    conn.execute("DROP TABLE practice_sessions")
+    conn.execute("ALTER TABLE practice_sessions_rebuilt RENAME TO practice_sessions")
+    conn.execute("PRAGMA foreign_keys=ON")
