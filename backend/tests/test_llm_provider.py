@@ -351,6 +351,9 @@ def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
     assert "Chinese-English mixed input" in prompt_text
     assert "Ask only one clear follow-up question" in prompt_text
     assert "Do not provide detailed grammar correction in the chat reply" in prompt_text
+    assert "伤心" in prompt_text
+    assert "first respond with empathy" in prompt_text
+    assert "That sounds good" in prompt_text
     assert "quick_feedback" not in prompt_text
     assert "gently steer the conversation back" in prompt_text
 
@@ -377,6 +380,9 @@ def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanati
     assert "score_breakdown must contain integer fields grammar, naturalness, relevance" in prompt_text
     assert "中文" in prompt_text
     assert "不要羞辱用户" in prompt_text
+    assert "never criticize the learner for mixing" in prompt_text
+    assert "meaning is clear" in prompt_text
+    assert "sad, upset, feeling down" in prompt_text
 
 
 def test_summary_prompt_uses_goal_scoring_focus_and_code_switching_summary():

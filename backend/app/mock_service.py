@@ -154,8 +154,8 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
     if has_chinese:
         naturalness -= 14
         clarity -= 8
-        issue_notes.append("你的句子里中文和英文混在一起，意思已经能理解，但还没有完全转换成英文口语表达。")
-        why_notes.append("把整句话统一成英文表达，能让对方更顺畅地接住你的话，也更贴近真实场景里的口语习惯。")
+        issue_notes.append("你的意思表达清楚了，可以把其中的关键词换成更自然的英文口语说法。")
+        why_notes.append(_mixed_input_why(message))
 
     if grammar_hits:
         pattern, fix = grammar_hits[0]
@@ -343,6 +343,9 @@ def _overall_score(breakdown: FeedbackScoreBreakdown) -> int:
 def _scenario_reply(scenario_id: str, user_message: str) -> str:
     lowered = user_message.lower()
 
+    if _detect_negative_emotion(user_message):
+        return _negative_emotion_reply(scenario_id)
+
     if scenario_id == "restaurant":
         if "chicken sandwich" in lowered:
             return (
@@ -389,6 +392,45 @@ def _scenario_reply(scenario_id: str, user_message: str) -> str:
         "Thanks for the introduction. Could you share one relevant project or experience "
         "that shows why you are a good fit for this role?"
     )
+
+
+_NEGATIVE_EMOTION_MARKERS = (
+    "伤心",
+    "难过",
+    "累",
+    "疲惫",
+    "焦虑",
+    "紧张",
+    "压力大",
+    "sad",
+    "upset",
+    "down",
+    "anxious",
+    "tired",
+    "stressed",
+    "stress",
+    "afraid",
+    "scared",
+    "frustrated",
+    "nervous",
+)
+
+
+def _detect_negative_emotion(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered or marker in message for marker in _NEGATIVE_EMOTION_MARKERS)
+
+
+def _negative_emotion_reply(scenario_id: str) -> str:
+    if scenario_id == "interview":
+        return "I'm sorry you're feeling that way. What part of the interview prep feels hardest right now?"
+    if scenario_id == "meeting":
+        return "That sounds really stressful. What is the biggest blocker for you right now?"
+    if scenario_id == "travel":
+        return "I'm sorry you're dealing with that. What happened, and how can I help with your trip?"
+    if scenario_id in {"restaurant", "ordering_food"}:
+        return "I'm sorry you're feeling that way. Would you like a moment, or can I help you choose something comforting?"
+    return "I'm sorry you're feeling that way. What happened?"
 
 
 def _default_better_expression(scenario_id: str) -> str:
@@ -593,6 +635,9 @@ def _compose_recommended_english(
         return "What have you been up to recently?"
     if "recently completed" in lowered and "ai" in lowered and ("项目" in message or "应用开发" in message):
         return "I recently completed two AI application development projects."
+    emotion_rewrite = _emotion_recommended_english(message)
+    if emotion_rewrite:
+        return emotion_rewrite
     if has_chinese:
         return _translate_mixed_message(scenario, message)
 
@@ -601,6 +646,54 @@ def _compose_recommended_english(
         rewritten = re.sub(re.escape(pattern), fix, rewritten, flags=re.IGNORECASE)
 
     return _ensure_sentence_punctuation(rewritten)
+
+
+def _emotion_recommended_english(message: str) -> str | None:
+    lowered = message.lower()
+    if any(token in message for token in ("伤心", "难过")) or any(token in lowered for token in ("sad", "upset", "down")):
+        return "I'm feeling really sad right now."
+    if "焦虑" in message or "anxious" in lowered:
+        return "I'm feeling really anxious right now."
+    if "紧张" in message or "nervous" in lowered:
+        return "I'm feeling really nervous right now."
+    if "压力大" in message or "stressed" in lowered or "stress" in lowered:
+        return "I'm feeling really stressed right now."
+    if any(token in message for token in ("累", "疲惫")) or "tired" in lowered:
+        return "I'm feeling really tired right now."
+    return None
+
+
+def _mixed_input_why(message: str) -> str:
+    if any(token in message for token in ("伤心", "难过")):
+        return (
+            "你的意思表达清楚了，这里可以把“伤心”换成英文里更常用的情绪词，"
+            "比如 sad、upset 或 feeling down。口语里用 “I'm feeling...” "
+            "会比 “I am so...” 更自然，也更像在描述自己当下的状态。"
+        )
+    if "焦虑" in message:
+        return (
+            "你的意思表达清楚了，这里可以把“焦虑”换成 anxious。口语里用 "
+            "“I'm feeling anxious right now” 能更自然地表达当下状态。"
+        )
+    if "紧张" in message:
+        return (
+            "你的意思表达清楚了，这里可以把“紧张”换成 nervous。口语里用 "
+            "“I'm feeling nervous” 更像自然地描述自己的感受。"
+        )
+    if "压力大" in message:
+        return (
+            "你的意思表达清楚了，这里可以把“压力大”换成 stressed。口语里用 "
+            "“I've been feeling stressed lately” 能更自然地表达最近的状态。"
+        )
+    if any(token in message for token in ("累", "疲惫")):
+        return (
+            "你的意思表达清楚了，这里可以把这个感受换成 tired 或 exhausted。"
+            "口语里用 “I'm feeling...” 能更自然地描述当下状态。"
+        )
+    return (
+        "你的意思表达清楚了，可以把中文里的核心词换成对应的英文词或常用搭配。"
+        "这样不会改变你的原意，只是让句子听起来更像自然口语。"
+    )
 
 
 def _translate_mixed_message(scenario: Scenario, message: str) -> str:
@@ -695,6 +788,8 @@ def _extract_known_fragments(message: str) -> list[str]:
 
 
 def _compose_more_natural_option(scenario: Scenario, recommended_english: str) -> str:
+    if "sad" in recommended_english.lower() or "upset" in recommended_english.lower() or "down" in recommended_english.lower():
+        return "I've been feeling really down lately."
     base = recommended_english.rstrip(".!?")
     return f"{base}. {_scenario_connector(scenario.scenario_id)}"
 

@@ -158,9 +158,60 @@ def test_feedback_endpoint_supports_chinese_input_with_english_suggestion():
     body = response.json()
     assert "schedule a meeting" in body["recommended_english"].lower()
     assert "tomorrow" in body["recommended_english"].lower()
-    assert "中文" in body["issue"]
+    assert "意思表达清楚" in body["issue"]
     assert "schedule a meeting" in body["more_natural_option"]
     assert body["user_intent"] == "我想约一个明天的会议。"
+
+
+def test_mock_chat_empathizes_with_mixed_negative_emotion():
+    response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "daily_conversation",
+            "latest_user_message": "I am so 伤心.",
+        },
+    )
+
+    assert response.status_code == 200
+    content = response.json()["reply"]["content"]
+    lowered = content.lower()
+    banned_phrases = ["that sounds good", "great", "nice", "awesome", "sounds fun"]
+
+    assert all(phrase not in lowered for phrase in banned_phrases)
+    assert any(
+        phrase in lowered
+        for phrase in ["sorry", "hard", "tough", "hear that", "feeling that way"]
+    )
+
+
+def test_mock_feedback_gently_rewrites_mixed_negative_emotion():
+    response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "daily_conversation",
+            "latest_user_message": "I am so 伤心.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    suggested_text = f"{body['recommended_english']} {body['more_natural_option']}".lower()
+    why = body["why"]
+    forbidden = [
+        "不符合英语表达习惯",
+        "不应该使用中文",
+        "不能混合中文",
+        "而不是混合",
+        "主要问题是使用了中文",
+        "使用了中文词汇",
+    ]
+
+    assert any(word in suggested_text for word in ["sad", "upset", "down"])
+    assert all(phrase not in why for phrase in forbidden)
+    assert any(
+        phrase in why
+        for phrase in ["意思表达清楚", "sad", "upset", "feeling down", "I'm feeling", "当下的状态"]
+    )
 
 
 def test_chat_endpoint_supports_mixed_input_without_breaking_mock_fallback():
