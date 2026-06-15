@@ -68,6 +68,7 @@ function App() {
   const [statusText, setStatusText] = useState("正在连接练习服务...");
   const [voiceRecordings, setVoiceRecordings] = useState<Record<number, string>>({});
   const voiceRecordingsRef = useRef<Record<number, string>>({});
+  const feedbackRequestSeqRef = useRef(0);
 
   // User profile state
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => loadStoredUser());
@@ -170,13 +171,18 @@ function App() {
 
       const id = Date.now();
       const userMessage: Message = { id, sender: "user", text };
+      const loadingMessage: Message = { id: id + 1, sender: "ai", text: "AI 正在回复...", isLoading: true };
       const conversationHistory = messages;
       const nextMessages = [...messages, userMessage];
+      const loadingMessages = [...nextMessages, loadingMessage];
+      const feedbackRequestSeq = feedbackRequestSeqRef.current + 1;
+      feedbackRequestSeqRef.current = feedbackRequestSeq;
 
-      setMessages(nextMessages);
+      setMessages(loadingMessages);
       setInput("");
       setSendStatus("loading");
       setFeedbackStatus("loading");
+      setStatusText("AI 正在回复...");
       if (recording) {
         setVoiceRecordings((current) => {
           const next = { ...current, [id]: recording.url };
@@ -185,34 +191,34 @@ function App() {
         });
       }
 
-      const [replyResult, feedbackResult] = await Promise.allSettled([
-        sendChatMessage(selected, sessionId, conversationHistory, userMessage),
-        fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage),
-      ]);
+      void fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage)
+        .then((turnFeedback) => {
+          setFeedback((current) =>
+            [...current.filter((item) => item.id !== turnFeedback.id), turnFeedback].sort((a, b) => a.id - b.id),
+          );
+          if (feedbackRequestSeqRef.current === feedbackRequestSeq) {
+            setFeedbackStatus("idle");
+          }
+        })
+        .catch(() => {
+          if (feedbackRequestSeqRef.current === feedbackRequestSeq) {
+            setFeedbackStatus("error");
+          }
+        });
 
-      const reply =
-        replyResult.status === "fulfilled" ? replyResult.value.message : createLocalReply(selected, nextMessages);
-      setMessages([...nextMessages, reply]);
-
-      if (feedbackResult.status === "fulfilled") {
-        setFeedback((current) => [...current, feedbackResult.value]);
-        setFeedbackStatus("idle");
-      } else {
-        setFeedbackStatus("error");
-      }
-
-      if (replyResult.status === "fulfilled" && feedbackResult.status === "fulfilled") {
-        setSource(sourceFromProvider(feedbackResult.value.provider));
+      try {
+        const replyResult = await sendChatMessage(selected, sessionId, conversationHistory, userMessage);
+        const reply = { ...replyResult.message, id: loadingMessage.id };
+        setMessages([...nextMessages, reply]);
+        setSource(sourceFromProvider(replyResult.provider));
         setSendStatus("idle");
-        setStatusText(providerStatusText(feedbackResult.value.provider, feedbackResult.value.fallbackReason));
-      } else if (replyResult.status === "fulfilled") {
-        setSource(sourceFromProvider(replyResult.value.provider));
-        setSendStatus("idle");
-        setStatusText("AI 回复来自后端，但本轮反馈暂时不可用，可继续对话。");
-      } else {
+        setStatusText(providerStatusText(replyResult.provider, replyResult.fallbackReason));
+      } catch {
+        const fallbackReply = { ...createLocalReply(selected, nextMessages), id: loadingMessage.id };
+        setMessages([...nextMessages, fallbackReply]);
         setSource("local-fallback");
         setSendStatus("error");
-        setStatusText("前端完全请求不到后端，本轮对话已使用前端本地模式继续。");
+        setStatusText("当前使用本地 fallback 回复。");
       }
     },
     [messages, selected, sendStatus, sessionId],
@@ -1031,7 +1037,7 @@ function Practice({
   const isRecording = speechInput.isListening || speechInput.isRestarting;
 
   useEffect(() => {
-    if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
+    if (!latestAiMessage || latestAiMessage.isLoading || latestAiMessage.id === lastSpokenAiId.current) return;
     lastSpokenAiId.current = latestAiMessage.id;
     speechOutput.speak(latestAiMessage.text);
   }, [latestAiMessage, speechOutput]);
@@ -1199,8 +1205,8 @@ function Practice({
           </div>
         ) : feedbackStatus === "error" ? (
           <div className="empty-state error">
-            <strong>本轮反馈暂时不可用</strong>
-            <p>本轮反馈生成失败，这里不会展示历史反馈。请继续对话，下一轮会重新尝试。</p>
+            <strong>本轮表达反馈生成失败，可以继续练习。</strong>
+            <p>这里不会展示历史反馈，下一轮发送后会重新尝试分析你的表达。</p>
           </div>
         ) : feedback.length === 0 ? (
           <div className="empty-state">
@@ -1370,6 +1376,7 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
 export default App;
 
 function loadingLabel(text: string): string {
+  if (text.includes("回复")) return "AI 正在回复";
   if (text.includes("分析")) return "正在分析";
   if (text.includes("总结")) return "正在总结";
   return "AI 思考中";

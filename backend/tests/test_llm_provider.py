@@ -31,7 +31,7 @@ def test_chat_fallback_stays_mock_when_llm_env_is_missing(monkeypatch: pytest.Mo
     assert response.fallback_reason == "missing_api_key"
     assert response.reply.role == "assistant"
     assert "chicken sandwich" in response.reply.content.lower()
-    assert response.quick_feedback.score >= 70
+    assert not hasattr(response, "quick_feedback")
 
 
 def test_feedback_falls_back_to_mock_when_llm_call_fails(monkeypatch: pytest.MonkeyPatch):
@@ -308,6 +308,25 @@ def test_json_parser_logs_operation_without_response_content(caplog: pytest.LogC
     assert content not in caplog.text
 
 
+def test_chat_falls_back_when_llm_reply_is_missing(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", lambda _messages: '{"reply": null}')
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="interview", latest_user_message="I feel nervous.")
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "schema_validation_failed"
+    assert response.reply.content != "None"
+
+
 def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
     import app.llm_provider as llm_provider
 
@@ -330,7 +349,9 @@ def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
     assert "Previous conversation" in prompt_text
     assert "Latest user message: 我想 check in early." in prompt_text
     assert "Chinese-English mixed input" in prompt_text
-    assert "ask exactly one specific clarifying question" in prompt_text
+    assert "Ask only one clear follow-up question" in prompt_text
+    assert "Do not provide detailed grammar correction in the chat reply" in prompt_text
+    assert "quick_feedback" not in prompt_text
     assert "gently steer the conversation back" in prompt_text
 
 

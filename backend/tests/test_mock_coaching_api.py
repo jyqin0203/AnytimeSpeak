@@ -84,8 +84,7 @@ def test_chat_endpoint_returns_scenario_aware_mock_reply():
     assert body["provider"] == "mock"
     assert "chicken sandwich" in body["reply"]["content"].lower()
     assert "onions" in body["reply"]["content"].lower()
-    assert body["quick_feedback"]["what_you_said"] == "I want a chicken sandwich, but no onion."
-    assert body["quick_feedback"]["score"] >= 70
+    assert "quick_feedback" not in body
 
 
 def test_feedback_endpoint_returns_correction_and_expression_tip():
@@ -181,8 +180,7 @@ def test_chat_endpoint_supports_mixed_input_without_breaking_mock_fallback():
     assert body["scenario_id"] == "meeting"
     assert body["reply"]["role"] == "assistant"
     assert "meeting" in body["reply"]["content"].lower()
-    assert "schedule a meeting" in body["quick_feedback"]["more_natural_option"]
-    assert body["quick_feedback"]["why"]
+    assert "quick_feedback" not in body
 
 
 def test_summary_endpoint_returns_scores_and_reusable_suggestions():

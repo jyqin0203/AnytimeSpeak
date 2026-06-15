@@ -20,7 +20,7 @@ export type Scenario = {
   replies: string[];
 };
 
-export type Message = { id: number; sender: Sender; text: string };
+export type Message = { id: number; sender: Sender; text: string; isLoading?: boolean };
 export type PracticeSession = {
   sessionId: string;
   scenarioId: string;
@@ -104,7 +104,7 @@ type ApiFeedback = {
   provider: string;
   fallback_reason?: string | null;
 };
-type ApiChatResponse = { reply: ApiChatMessage; provider: string; fallback_reason?: string | null; quick_feedback?: ApiFeedback };
+type ApiChatResponse = { reply: ApiChatMessage; provider: string; fallback_reason?: string | null };
 type ApiSummaryResponse = {
   summary: string;
   strengths: string[];
@@ -336,8 +336,8 @@ export async function sendChatMessage(
 
   return {
     message: { id: Date.now() + 1, sender: "ai", text: sanitizeAiText(response.reply.content) },
-    provider: response.provider ?? response.quick_feedback?.provider ?? "mock",
-    fallbackReason: response.fallback_reason ?? response.quick_feedback?.fallback_reason ?? null,
+    provider: response.provider ?? "mock",
+    fallbackReason: response.fallback_reason ?? null,
   };
 }
 
@@ -440,10 +440,12 @@ function sanitizeAiText(text: string): string {
 }
 
 function toApiMessages(messages: Message[]): ApiChatMessage[] {
-  return messages.map((message) => ({
-    role: message.sender === "ai" ? "assistant" : "user",
-    content: message.text,
-  }));
+  return messages
+    .filter((message) => !message.isLoading)
+    .map((message) => ({
+      role: message.sender === "ai" ? "assistant" : "user",
+      content: message.text,
+    }));
 }
 
 function fromApiMessage(message: ApiChatMessage, index: number): Message {

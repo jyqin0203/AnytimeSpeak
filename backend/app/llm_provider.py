@@ -90,14 +90,10 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
 
     try:
         data = _json_from_llm(_request_chat_completion(_chat_prompt(request)), "chat")
-        quick_feedback = _feedback_from_data(data.get("quick_feedback", {}))
-        quick_feedback.provider = "llm"
-        quick_feedback.fallback_reason = None
         response = ChatResponse(
             session_id=request.session_id or "llm-session",
             scenario_id=request.scenario_id,
             reply=_chat_message_from_data(data.get("reply")),
-            quick_feedback=quick_feedback,
             provider="llm",
         )
         _log_provider_state("chat", "llm")
@@ -161,8 +157,6 @@ def _mock_chat_reply(request: ChatRequest, reason: str) -> ChatResponse:
     response = mock_service.create_chat_reply(request)
     response.provider = "mock"
     response.fallback_reason = reason
-    response.quick_feedback.provider = "mock"
-    response.quick_feedback.fallback_reason = reason
     _log_provider_state("chat", "mock", reason)
     return response
 
@@ -248,27 +242,25 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
                 extra_instructions=(
                     "You are the AI role in a spoken English roleplay practice session. "
                     "Ground every reply in the specific story, AI role, and conversation history "
-                    "above — never give generic, template-like follow-ups that could fit any "
+                    "above. Never give generic, template-like follow-ups that could fit any "
                     "scenario, and vary your sentence patterns across turns so the conversation "
                     "feels alive rather than scripted. "
-                    "Keep replies natural, brief (one to three sentences), and easy to read aloud "
-                    "for spoken practice. "
-                    "Prefer one or two short sentences under 45 words total. "
+                    "Reply in 1-2 short natural English sentences under 45 words total. "
+                    "Stay in role for the selected scenario. "
+                    "Ask only one clear follow-up question. "
+                    "Do not provide detailed grammar correction in the chat reply. "
+                    "Keep the conversation natural and beginner-friendly. "
                     "Use plain punctuation only: no em dashes, repeated punctuation, Markdown "
                     "bullets, numbered lists, or overly formal coaching language. "
                     "If the learner's message is unclear, briefly acknowledge what you did "
-                    "understand and ask exactly one specific clarifying question. "
+                    "understand and ask one specific clarifying question. "
                     "If the learner drifts off-topic, respond naturally and briefly, then gently "
                     "steer the conversation back toward the scenario goal while staying in character. "
                     "If the learner mixes Chinese and English, infer their meaning and continue "
-                    "naturally in your AI role — never break character to translate or lecture "
+                    "naturally in your AI role. Never break character to translate or lecture "
                     "about language. "
-                    "Return JSON only with keys reply and quick_feedback. "
-                    "reply must include role='assistant' and content. "
-                    "quick_feedback must include what_you_said, user_intent, "
-                    "recommended_english, issue, why, more_natural_option, "
-                    "score, score_breakdown, and provider. "
-                    "Keep quick_feedback brief and encouraging."
+                    "Return JSON only with key reply. reply must include role='assistant' "
+                    "and content."
                 ),
             ),
         },
@@ -278,7 +270,7 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
                 f"Scenario id: {request.scenario_id}\n"
                 f"Previous conversation:\n{history}\n"
                 f"Latest user message: {latest_user_message}\n"
-                "Continue the role-play with one concise assistant reply and brief feedback."
+                "Continue the role-play with one concise assistant reply."
             ),
         },
     ]
@@ -430,7 +422,11 @@ def _fallback_reason(exc: Exception) -> str:
 
 
 def _chat_message_from_data(data: Any) -> ChatMessage:
+    if data is None:
+        raise ValueError("Chat reply is required.")
     if isinstance(data, dict):
+        if data.get("content") is None:
+            raise ValueError("Chat reply content is required.")
         return ChatMessage(
             role=data.get("role", "assistant"),
             content=_clean_llm_text(data["content"], CHAT_REPLY_MAX_CHARS),

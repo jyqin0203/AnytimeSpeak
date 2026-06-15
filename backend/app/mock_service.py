@@ -124,22 +124,12 @@ def create_chat_reply(request: ChatRequest) -> ChatResponse:
     scenario = resolve_scenario(request.session_id, request.scenario_id)
     user_message = _latest_user_text(request)
     reply_text = _scenario_reply(scenario.id, user_message)
-    feedback = create_feedback(
-        FeedbackRequest(
-            session_id=request.session_id,
-            scenario_id=scenario.id,
-            latest_user_message=user_message or "Hello.",
-            conversation_history=_conversation_history(request),
-        )
-    )
 
     return ChatResponse(
         session_id=request.session_id or f"session_{uuid4().hex[:12]}",
         scenario_id=scenario.id,
         reply=ChatMessage(role="assistant", content=reply_text),
-        quick_feedback=feedback,
-        provider=feedback.provider,
-        fallback_reason=feedback.fallback_reason,
+        provider="mock",
     )
 
 
