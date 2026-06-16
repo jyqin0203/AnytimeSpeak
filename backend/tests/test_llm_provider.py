@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 
 import pytest
 
@@ -240,6 +240,53 @@ def test_chat_uses_shorter_provider_timeout():
     assert llm_provider.CHAT_TIMEOUT_SECONDS <= 30.0
 
 
+def test_feedback_uses_shorter_provider_timeout():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.FEEDBACK_TIMEOUT_SECONDS < llm_provider.LLM_TIMEOUT_SECONDS
+    assert llm_provider.FEEDBACK_TIMEOUT_SECONDS <= 30.0
+
+
+def test_feedback_passes_shorter_timeout_to_provider(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    captured = {}
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        captured["timeout_seconds"] = timeout_seconds
+        return """
+        {
+          "what_you_said": "love story what about you",
+          "recommended_english": "I like Love Story. What about you?",
+          "issue": "你的意思清楚，可以把歌名和问句分开表达。",
+          "why": "这样说更自然，因为先表达自己的喜好，再单独问对方。",
+          "more_natural_option": "I really like Love Story. How about you?",
+          "score": 86,
+          "score_breakdown": {
+            "grammar": 88,
+            "naturalness": 84,
+            "relevance": 90,
+            "clarity": 86
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message="love story what about you")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert captured["timeout_seconds"] == llm_provider.FEEDBACK_TIMEOUT_SECONDS
+
+
 def test_llm_provider_info_logs_are_enabled():
     import app.llm_provider as llm_provider
 
@@ -254,7 +301,7 @@ def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         assert any("Return JSON only" in message["content"] for message in messages)
         return """
         {
@@ -297,7 +344,7 @@ def test_summary_accepts_string_lists_score_breakdown_and_percent_scores(monkeyp
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "summary": "You completed the practice.",
@@ -414,7 +461,11 @@ def test_feedback_falls_back_on_invalid_json_without_crashing(monkeypatch: pytes
     monkeypatch.setenv("LLM_API_KEY", "test-key")
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
-    monkeypatch.setattr(llm_provider, "_request_chat_completion", lambda _messages: "{not valid json")
+    monkeypatch.setattr(
+        llm_provider,
+        "_request_chat_completion",
+        lambda _messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS: "{not valid json",
+    )
 
     response = llm_provider.create_feedback_with_fallback(
         FeedbackRequest(scenario_id="daily", latest_user_message="I am so 伤心.")
@@ -593,7 +644,7 @@ def test_feedback_accepts_frontend_wording_aliases_without_schema_fallback(monke
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "original_text": "I am so 伤心.",
@@ -634,7 +685,7 @@ def test_feedback_repairs_invalid_scores_without_schema_fallback(monkeypatch: py
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "what_you_said": "I want something not too spicy.",
@@ -675,7 +726,7 @@ def test_feedback_sanitizes_forbidden_mixed_input_criticism(monkeypatch: pytest.
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "what_you_said": "I am so 伤心.",
@@ -725,7 +776,7 @@ def test_feedback_removes_prompt_labels_and_repairs_repeated_original(monkeypatc
 
     original = "I want to eat some delicious noodles do you want to join me"
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "what_you_said": "I want to eat some delicious noodles do you want to join me",
@@ -771,7 +822,7 @@ def test_feedback_ignores_punctuation_only_voice_transcript_corrections(monkeypa
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "what_you_said": "and would you like a drink",
@@ -891,7 +942,7 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "what_you_said": "I want to 预约一个 meeting tomorrow.",

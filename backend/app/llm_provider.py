@@ -27,6 +27,7 @@ from app.schemas import (
 
 LLM_TIMEOUT_SECONDS = 90.0
 CHAT_TIMEOUT_SECONDS = 25.0
+FEEDBACK_TIMEOUT_SECONDS = 25.0
 CHAT_REPLY_MAX_CHARS = 260
 FEEDBACK_SHORT_MAX_CHARS = 90
 FEEDBACK_MEDIUM_MAX_CHARS = 140
@@ -126,7 +127,10 @@ def create_feedback_with_fallback(request: FeedbackRequest) -> FeedbackResponse:
         return _mock_feedback(request, config_reason)
 
     try:
-        data = _json_from_llm(_request_chat_completion(_feedback_prompt(request)), "feedback")
+        data = _json_from_llm(
+            _request_chat_completion(_feedback_prompt(request), timeout_seconds=FEEDBACK_TIMEOUT_SECONDS),
+            "feedback",
+        )
         feedback = _feedback_from_data(data, request)
         feedback.provider = "llm"
         feedback.fallback_reason = None
