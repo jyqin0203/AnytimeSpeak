@@ -292,6 +292,67 @@ const FOCUS_ZH: Record<string, string> = {
   "travel vocabulary": "旅行词汇",
   "clear problem descriptions": "清晰问题描述",
   "natural small talk": "日常闲聊",
+  "everyday vocabulary": "日常词汇",
+  "polite problem descriptions": "礼貌求助",
+  "clear preference wording": "偏好表达",
+  "diplomatic wording": "委婉表达",
+};
+
+const SCENARIO_DISPLAY_ZH: Record<string, Partial<Pick<Scenario, "title" | "description" | "aiRole" | "userRole" | "goal" | "focus" | "duration">>> = {
+  restaurant: {
+    title: "餐厅点餐",
+    description: "练习点餐、询问推荐、说明偏好，并礼貌确认订单。",
+    aiRole: "餐厅服务员",
+    userRole: "顾客",
+    goal: "练习点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
+    focus: ["礼貌点餐", "推荐询问", "偏好说明", "订单确认"],
+    duration: "6 分钟",
+  },
+  ordering_food: {
+    title: "餐厅点餐",
+    description: "练习点餐、询问推荐、说明偏好，并礼貌确认订单。",
+    aiRole: "餐厅服务员",
+    userRole: "顾客",
+    goal: "练习点餐、询问推荐、说明忌口或偏好，并确认最终订单。",
+    focus: ["礼貌点餐", "推荐询问", "偏好说明", "订单确认"],
+    duration: "6 分钟",
+  },
+  travel: {
+    title: "旅行练习",
+    description: "练习问路、入住、咨询旅行信息，并在陌生环境中礼貌求助。",
+    aiRole: "旅行服务人员 / 本地向导",
+    userRole: "旅行者",
+    goal: "练习问路、咨询旅行信息、办理入住、说明简单旅行问题并礼貌求助。",
+    focus: ["问路咨询", "入住沟通", "礼貌求助", "问题说明"],
+    duration: "8 分钟",
+  },
+  daily_conversation: {
+    title: "日常交流练习",
+    description: "练习轻松闲聊，分享日常生活、个人偏好和简单追问。",
+    aiRole: "友好的日常聊天伙伴",
+    userRole: "英语学习者",
+    goal: "练习轻松日常交流，描述日常生活、分享偏好，并进行简单追问。",
+    focus: ["日常闲聊", "生活描述", "偏好分享", "简单追问"],
+    duration: "6 分钟",
+  },
+  interview: {
+    title: "面试练习",
+    description: "练习自我介绍、项目经历和职业动机，让回答更清楚、更有结构。",
+    aiRole: "面试官",
+    userRole: "候选人",
+    goal: "练习清楚介绍自己、说明经验价值、回答常见面试问题，并提出专业追问。",
+    focus: ["自我介绍", "项目经历", "职业动机", "结构化回答"],
+    duration: "8 分钟",
+  },
+  meeting: {
+    title: "会议练习",
+    description: "练习汇报进展、说明阻塞点、请求支持，并对齐下一步。",
+    aiRole: "会议同事 / 会议主持人",
+    userRole: "团队成员",
+    goal: "练习给出进展更新、说明问题、请求澄清，并确认下一步和完成时间。",
+    focus: ["进度汇报", "问题说明", "请求澄清", "下一步对齐"],
+    duration: "8 分钟",
+  },
 };
 
 function normalizeLevel(raw: string): string {
@@ -314,21 +375,22 @@ export async function fetchScenarios(): Promise<Scenario[]> {
 
   const mapped = apiScenarios.map((scenario) => {
     const local = localById.get(scenario.id);
+    const display = SCENARIO_DISPLAY_ZH[scenario.id] ?? SCENARIO_DISPLAY_ZH[scenario.scenario_id] ?? {};
     return {
       id: scenario.id,
       scenarioId: scenario.scenario_id,
-      title: local?.title ?? `${scenario.title_zh}练习`,
+      title: display.title ?? local?.title ?? `${scenario.title_zh}练习`,
       englishTitle: scenario.title,
-      description: local?.description ?? scenario.conversation_style,
-      aiRole: local?.aiRole ?? scenario.ai_role,
-      userRole: local?.userRole ?? scenario.user_role,
-      goal: local?.goal ?? scenario.goal,
+      description: display.description ?? local?.description ?? scenario.conversation_style,
+      aiRole: display.aiRole ?? local?.aiRole ?? scenario.ai_role,
+      userRole: display.userRole ?? local?.userRole ?? scenario.user_role,
+      goal: display.goal ?? local?.goal ?? scenario.goal,
       storySeedId: scenario.story_seed_id,
       storyIntroZh: scenario.story_intro_zh,
       storyIntroEn: scenario.story_intro_en,
       level: local?.level ?? normalizeLevel(scenario.level),
-      duration: local?.duration ?? "8 分钟",
-      focus: local?.focus ?? scenario.feedback_focus.map(normalizeFocus),
+      duration: display.duration ?? local?.duration ?? "8 分钟",
+      focus: display.focus ?? local?.focus ?? scenario.feedback_focus.map(normalizeFocus),
       usefulExpressions: scenario.useful_expressions,
       openingLine: scenario.opening_message ?? scenario.opening_line,
       replies: local?.replies ?? [scenario.opening_line],

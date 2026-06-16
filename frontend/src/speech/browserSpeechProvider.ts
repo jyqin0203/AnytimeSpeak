@@ -106,7 +106,7 @@ export const browserSpeechInputProvider: SpeechInputProvider = {
     }
 
     const recognition = new Recognition();
-    const lang = options.lang ?? "en-US";
+    const lang = options.lang ?? "zh-CN";
 
     recognition.lang = lang;
     recognition.continuous = options.continuous ?? false;

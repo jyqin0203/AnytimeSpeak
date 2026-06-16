@@ -12,7 +12,7 @@ type UseSpeechInputOptions = {
 
 export function useSpeechInput({
   provider = browserSpeechInputProvider,
-  lang = "en-US",
+  lang = "zh-CN",
   interimResults = true,
   continuous = false,
   onTranscriptChange,
