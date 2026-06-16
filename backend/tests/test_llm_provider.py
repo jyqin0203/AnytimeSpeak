@@ -289,6 +289,50 @@ def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.
     assert response.scores.overall == 85
 
 
+def test_summary_accepts_string_lists_score_breakdown_and_percent_scores(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages):
+        return """
+        {
+          "summary": "You completed the practice.",
+          "strengths": "Clear meaning; Good scenario fit",
+          "repeated_issues": "Add more specific details",
+          "better_expressions": "Could you tell me more about that?",
+          "scenario_completion": "You handled the basic conversation.",
+          "next_practice_focus": "Practice shorter answers.",
+          "score_breakdown": {
+            "grammar": "86%",
+            "naturalness": "8/10",
+            "clarity": "84",
+            "relevance": 88,
+            "overall": "85%"
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_summary_with_fallback(
+        SummaryRequest(
+            scenario_id="daily_conversation",
+            messages=[ChatMessage(role="user", content="I am practicing small talk.")],
+        )
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.strengths == ["Clear meaning", "Good scenario fit"]
+    assert response.repeated_issues == ["Add more specific details"]
+    assert response.scores.expression == 80
+    assert response.scores.overall == 85
+
+
 def test_json_parser_accepts_markdown_code_fence_and_text():
     import app.llm_provider as llm_provider
 
@@ -462,6 +506,29 @@ def test_chat_accepts_common_content_field_without_schema_fallback(monkeypatch: 
     assert response.provider == "llm"
     assert response.fallback_reason is None
     assert response.reply.content == "I am sorry to hear that. What happened?"
+
+
+def test_chat_accepts_reply_text_and_normalizes_role(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return '{"reply": {"role": "ai", "text": "I hear you. What happened?"}}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="daily_conversation", latest_user_message="I am sad.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.role == "assistant"
+    assert response.reply.content == "I hear you. What happened?"
 
 
 def test_chat_falls_back_when_llm_repeats_previous_assistant_turn(monkeypatch: pytest.MonkeyPatch):

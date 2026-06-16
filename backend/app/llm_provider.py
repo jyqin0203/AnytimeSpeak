@@ -133,7 +133,7 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
 
     try:
         data = _json_from_llm(_request_chat_completion(_summary_prompt(request)), "summary")
-        scores = data.get("scores", {})
+        scores = data.get("scores") or data.get("score_breakdown") or {}
         response = SummaryResponse(
             scenario_id=request.scenario_id,
             summary=_clean_llm_text(data.get("summary") or "这次练习完成了主要对话目标。", SUMMARY_TEXT_MAX_CHARS),
@@ -144,11 +144,11 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
             next_practice_focus=_clean_llm_text(data.get("next_practice_focus") or "下次可以补充更多具体细节。", SUMMARY_TEXT_MAX_CHARS),
             code_switching_advice=_optional_string(data.get("code_switching_advice"), SUMMARY_TEXT_MAX_CHARS),
             scores=ScoreBreakdown(
-                grammar=_clamp_breakdown_value(scores.get("grammar", 82)),
-                expression=_clamp_breakdown_value(scores.get("expression", 82)),
-                fluency=_clamp_breakdown_value(scores.get("fluency", 82)),
-                scenario_completion=_clamp_breakdown_value(scores.get("scenario_completion", scores.get("completion", 82))),
-                overall=_clamp_breakdown_value(scores.get("overall", 82)),
+                grammar=_summary_score(data, scores, "grammar"),
+                expression=_summary_score(data, scores, "expression", "naturalness"),
+                fluency=_summary_score(data, scores, "fluency", "clarity"),
+                scenario_completion=_summary_score(data, scores, "scenario_completion", "completion", "relevance"),
+                overall=_summary_score(data, scores, "overall", "score"),
             ),
             provider="llm",
         )
@@ -553,11 +553,12 @@ def _chat_message_from_data(data: Any) -> ChatMessage:
     if data is None:
         raise ValueError("Chat reply is required.")
     if isinstance(data, dict):
-        if data.get("content") is None:
+        content = _first_optional(data, "content", "text", "message", "reply")
+        if content is None:
             raise ValueError("Chat reply content is required.")
         return ChatMessage(
-            role=data.get("role", "assistant"),
-            content=_clean_llm_text(data["content"], CHAT_REPLY_MAX_CHARS),
+            role="assistant",
+            content=_clean_llm_text(content, CHAT_REPLY_MAX_CHARS),
         )
     return ChatMessage(role="assistant", content=_clean_llm_text(data, CHAT_REPLY_MAX_CHARS))
 
@@ -724,14 +725,38 @@ def _score_breakdown_from_data(breakdown: Any, fallback_score: int) -> FeedbackS
     )
 
 
+def _summary_score(data: dict[str, Any], scores: Any, *keys: str) -> int:
+    sources = [scores if isinstance(scores, dict) else {}, data]
+    for source in sources:
+        for key in keys:
+            if key in source:
+                return _clamp_breakdown_value(source[key])
+    return 82
+
+
 def _clamp_breakdown_value(value: Any) -> int:
-    return max(0, min(100, int(value)))
+    if isinstance(value, str):
+        text = value.strip()
+        ratio_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", text)
+        if ratio_match:
+            numerator = float(ratio_match.group(1))
+            denominator = float(ratio_match.group(2))
+            if denominator:
+                return max(0, min(100, round((numerator / denominator) * 100)))
+        number_match = re.search(r"-?\d+(?:\.\d+)?", text)
+        if number_match:
+            value = number_match.group(0)
+    return max(0, min(100, round(float(value))))
 
 
 def _string_list(value: Any, *, limit: int | None = None, max_chars: int | None = None) -> list[str]:
-    if not isinstance(value, list):
-        raise ValueError("Expected a list.")
-    items = value[:limit] if limit is not None else value
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        items = [item.strip(" -\t") for item in re.split(r"[\n;；]+", value) if item.strip(" -\t")]
+    else:
+        items = [value]
+    items = items[:limit] if limit is not None else items
     return [_clean_llm_text(item, max_chars) for item in items]
 
 
