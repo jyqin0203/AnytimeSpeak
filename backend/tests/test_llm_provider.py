@@ -441,7 +441,7 @@ def test_json_parser_logs_operation_without_response_content(caplog: pytest.LogC
     assert content not in caplog.text
 
 
-def test_chat_falls_back_when_llm_reply_is_missing(monkeypatch: pytest.MonkeyPatch):
+def test_chat_repairs_missing_llm_reply_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
     monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
@@ -459,9 +459,10 @@ def test_chat_falls_back_when_llm_reply_is_missing(monkeypatch: pytest.MonkeyPat
         ChatRequest(scenario_id="interview", latest_user_message="I feel nervous.")
     )
 
-    assert response.provider == "mock"
-    assert response.fallback_reason == "schema_validation_failed"
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
     assert response.reply.content != "None"
+    assert response.reply.content
 
 
 def test_chat_accepts_plain_text_llm_reply_instead_of_json_parse_fallback(monkeypatch: pytest.MonkeyPatch):
@@ -531,6 +532,28 @@ def test_chat_accepts_reply_text_and_normalizes_role(monkeypatch: pytest.MonkeyP
     assert response.reply.content == "I hear you. What happened?"
 
 
+def test_chat_accepts_nested_reply_content_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return '{"reply": {"content": {"text": "That sounds tough. What happened?"}}}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="daily_conversation", latest_user_message="I am sad.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.content == "That sounds tough. What happened?"
+
+
 def test_chat_falls_back_when_llm_repeats_previous_assistant_turn(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
@@ -558,7 +581,7 @@ def test_chat_falls_back_when_llm_repeats_previous_assistant_turn(monkeypatch: p
     )
 
     assert response.provider == "mock"
-    assert response.fallback_reason == "schema_validation_failed"
+    assert response.fallback_reason == "llm_low_quality_reply"
     assert response.reply.content != repeated
 
 
@@ -601,6 +624,47 @@ def test_feedback_accepts_frontend_wording_aliases_without_schema_fallback(monke
     assert response.recommended_english == "I'm feeling really sad right now."
     assert response.more_natural_option == "I've been feeling really down lately."
     assert response.score == 85
+
+
+def test_feedback_repairs_invalid_scores_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages):
+        return """
+        {
+          "what_you_said": "I want something not too spicy.",
+          "recommended_english": "I’d like something that isn’t too spicy.",
+          "issue": "你的意思清楚，可以换成更自然的点餐表达。",
+          "why": "这样说更礼貌，也更像在向服务员说明口味偏好。",
+          "more_natural_option": "Could you recommend a mild dish for me?",
+          "score": "N/A",
+          "score_breakdown": {
+            "grammar": "",
+            "naturalness": null,
+            "relevance": "good",
+            "clarity": "8/10"
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="restaurant", latest_user_message="I want something not too spicy.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.score == 82
+    assert response.score_breakdown.grammar == 82
+    assert response.score_breakdown.naturalness == 82
+    assert response.score_breakdown.relevance == 82
+    assert response.score_breakdown.clarity == 80
 
 
 def test_feedback_ignores_punctuation_only_voice_transcript_corrections(monkeypatch: pytest.MonkeyPatch):

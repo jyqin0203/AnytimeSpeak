@@ -41,6 +41,14 @@ class LLMResponseParseError(ValueError):
     pass
 
 
+class LLMResponseSchemaError(ValueError):
+    pass
+
+
+class LLMResponseQualityError(ValueError):
+    pass
+
+
 def _dotenv_paths() -> list[Path]:
     backend_dir = Path(__file__).resolve().parents[1]
     project_root = backend_dir.parent
@@ -93,9 +101,12 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
     try:
         raw_content = _request_chat_completion(_chat_prompt(request), timeout_seconds=CHAT_TIMEOUT_SECONDS)
         data = _chat_data_from_llm(raw_content)
-        reply = _chat_message_from_data(_first_present(data, "reply", "message", "assistant_reply", "content", "text"))
+        reply = _chat_message_from_data(
+            _first_optional(data, "reply", "message", "assistant_reply", "content", "text"),
+            request,
+        )
         if _chat_reply_repeats_history(reply, _conversation_history(request)):
-            raise ValueError("Chat reply repeated the previous assistant turn.")
+            raise LLMResponseQualityError("Chat reply repeated the previous assistant turn.")
         response = ChatResponse(
             session_id=request.session_id or "llm-session",
             scenario_id=request.scenario_id,
@@ -544,23 +555,52 @@ def _fallback_reason(exc: Exception) -> str:
         return f"llm_http_{exc.response.status_code}"
     if isinstance(exc, LLMResponseParseError):
         return "json_parse_failed"
-    if isinstance(exc, (KeyError, TypeError, ValueError)):
+    if isinstance(exc, LLMResponseQualityError):
+        return "llm_low_quality_reply"
+    if isinstance(exc, (LLMResponseSchemaError, KeyError, TypeError, ValueError)):
         return "schema_validation_failed"
     return "llm_request_failed"
 
 
-def _chat_message_from_data(data: Any) -> ChatMessage:
+def _chat_message_from_data(data: Any, request: ChatRequest | None = None) -> ChatMessage:
+    content = _chat_content_from_data(data)
+    if not content:
+        content = _safe_chat_repair_reply(request)
+    if not content:
+        raise LLMResponseSchemaError("Chat reply content is required.")
+
+    content = _clean_llm_text(content, CHAT_REPLY_MAX_CHARS)
+    if not content:
+        content = _safe_chat_repair_reply(request)
+    if not content:
+        raise LLMResponseSchemaError("Chat reply content is required.")
+
+    return ChatMessage(role="assistant", content=content)
+
+
+def _chat_content_from_data(data: Any) -> Any:
     if data is None:
-        raise ValueError("Chat reply is required.")
+        return None
     if isinstance(data, dict):
         content = _first_optional(data, "content", "text", "message", "reply")
-        if content is None:
-            raise ValueError("Chat reply content is required.")
-        return ChatMessage(
-            role="assistant",
-            content=_clean_llm_text(content, CHAT_REPLY_MAX_CHARS),
-        )
-    return ChatMessage(role="assistant", content=_clean_llm_text(data, CHAT_REPLY_MAX_CHARS))
+        if isinstance(content, dict):
+            return _chat_content_from_data(content)
+        if isinstance(content, list):
+            return " ".join(_clean_llm_text(item) for item in content if _clean_llm_text(item))
+        return content
+    if isinstance(data, list):
+        for item in data:
+            content = _chat_content_from_data(item)
+            if content:
+                return content
+        return None
+    return data
+
+
+def _safe_chat_repair_reply(request: ChatRequest | None) -> str:
+    if request is None:
+        return "I see. Can you tell me a little more?"
+    return mock_service.create_chat_reply(request).reply.content
 
 
 def _feedback_from_data(data: Any, request: FeedbackRequest | None = None) -> FeedbackResponse:
@@ -653,10 +693,10 @@ def _first_optional(data: dict[str, Any], *keys: str) -> Any | None:
 
 def _score_from_data(data: dict[str, Any]) -> int:
     if data.get("score") is not None:
-        return _clamp_breakdown_value(data["score"])
+        return _clamp_breakdown_value(data["score"], fallback=82)
     breakdown = data.get("score_breakdown")
     if isinstance(breakdown, dict) and breakdown:
-        values = [_clamp_breakdown_value(value) for value in breakdown.values()]
+        values = [_clamp_breakdown_value(value, fallback=82) for value in breakdown.values()]
         return round(sum(values) / len(values))
     return 82
 
@@ -714,8 +754,8 @@ def _score_breakdown_from_data(breakdown: Any, fallback_score: int) -> FeedbackS
     def pick(*keys: str) -> int:
         for key in keys:
             if key in source:
-                return _clamp_breakdown_value(source[key])
-        return _clamp_breakdown_value(fallback_score)
+                return _clamp_breakdown_value(source[key], fallback=fallback_score)
+        return _clamp_breakdown_value(fallback_score, fallback=82)
 
     return FeedbackScoreBreakdown(
         grammar=pick("grammar"),
@@ -730,13 +770,17 @@ def _summary_score(data: dict[str, Any], scores: Any, *keys: str) -> int:
     for source in sources:
         for key in keys:
             if key in source:
-                return _clamp_breakdown_value(source[key])
+                return _clamp_breakdown_value(source[key], fallback=82)
     return 82
 
 
-def _clamp_breakdown_value(value: Any) -> int:
+def _clamp_breakdown_value(value: Any, fallback: int = 82) -> int:
+    if value is None:
+        return fallback
     if isinstance(value, str):
         text = value.strip()
+        if not text:
+            return fallback
         ratio_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", text)
         if ratio_match:
             numerator = float(ratio_match.group(1))
@@ -746,7 +790,12 @@ def _clamp_breakdown_value(value: Any) -> int:
         number_match = re.search(r"-?\d+(?:\.\d+)?", text)
         if number_match:
             value = number_match.group(0)
-    return max(0, min(100, round(float(value))))
+        else:
+            return fallback
+    try:
+        return max(0, min(100, round(float(value))))
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _string_list(value: Any, *, limit: int | None = None, max_chars: int | None = None) -> list[str]:
