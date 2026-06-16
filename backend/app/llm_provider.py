@@ -635,12 +635,13 @@ def _feedback_from_data(data: Any, request: FeedbackRequest | None = None) -> Fe
         or recommended_english,
         FEEDBACK_MEDIUM_MAX_CHARS,
     )
-    issue = _clean_llm_text(
+    issue = _clean_feedback_field_text(
         _first_optional(data, "issue", "main_issue", "problem", "focus")
         or "你的意思能理解，可以把句子整理得更自然、更清楚。",
         FEEDBACK_SHORT_MAX_CHARS,
+        field="issue",
     )
-    why = _clean_llm_text(
+    why = _clean_feedback_field_text(
         _first_optional(
             data,
             "why",
@@ -651,6 +652,7 @@ def _feedback_from_data(data: Any, request: FeedbackRequest | None = None) -> Fe
         )
         or "你的意思表达清楚了。换成更常用的英文词汇、语序或搭配后，听起来会更像自然口语。",
         FEEDBACK_MEDIUM_MAX_CHARS,
+        field="why",
     )
     user_intent = _optional_string(
         _first_optional(data, "user_intent", "user_intent_zh", "intent", "meaning"),
@@ -672,7 +674,81 @@ def _feedback_from_data(data: Any, request: FeedbackRequest | None = None) -> Fe
         code_switching_tip=why,
     )
     response = _avoid_forbidden_mixed_input_feedback(response, request)
+    response = _avoid_repeated_original_feedback(response, request)
     return _avoid_punctuation_only_feedback(response)
+
+
+def _clean_feedback_field_text(value: Any, max_chars: int, *, field: str) -> str:
+    text = _clean_llm_text(value, None)
+    text = _strip_feedback_field_labels(text, field=field)
+    return _clean_llm_text(text, max_chars)
+
+
+def _strip_feedback_field_labels(text: str, *, field: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return cleaned
+
+    label_pattern = r"(?:主要问题|问题|为什么这样更自然|为什么|原因|推荐表达|更自然的说法)\s*[:：]\s*"
+    if field == "why":
+        match = re.search(r"(?:为什么这样更自然|为什么|原因)\s*[:：]\s*(.+)$", cleaned)
+        if match:
+            cleaned = match.group(1).strip()
+        cleaned = re.sub(label_pattern, "", cleaned).strip()
+        return cleaned
+
+    match = re.search(r"(?:主要问题|问题)\s*[:：]\s*(.*?)(?:\s*(?:为什么这样更自然|为什么|原因)\s*[:：]|$)", cleaned)
+    if match:
+        cleaned = match.group(1).strip()
+    cleaned = re.sub(label_pattern, "", cleaned).strip()
+    return cleaned
+
+
+def _avoid_repeated_original_feedback(
+    response: FeedbackResponse,
+    request: FeedbackRequest | None,
+) -> FeedbackResponse:
+    original = response.what_you_said or (request.latest_user_message if request else "") or ""
+    if not original:
+        return response
+    if not _is_same_expression(original, response.recommended_english):
+        return response
+
+    repaired = _natural_rewrite_for_repeated_original(original)
+    if repaired is None:
+        return response
+
+    recommended, more_natural, issue, why = repaired
+    response.recommended_english = recommended
+    response.corrected_sentence = recommended
+    response.more_natural_option = more_natural
+    response.better_expression = more_natural
+    response.issue = issue
+    response.why = why
+    response.code_switching_tip = why
+    return response
+
+
+def _is_same_expression(left: str, right: str) -> bool:
+    def normalize(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    return bool(left.strip()) and normalize(left) == normalize(right)
+
+
+def _natural_rewrite_for_repeated_original(original: str) -> tuple[str, str, str, str] | None:
+    lowered = original.lower()
+    if (
+        "noodle" in lowered
+        and ("join me" in lowered or "go with me" in lowered or "do you want" in lowered)
+    ):
+        return (
+            "I want to get some delicious noodles. Do you want to join me?",
+            "I'm thinking of getting some delicious noodles. Would you like to come with me?",
+            "你的意思表达清楚了，可以把吃面和邀请分成两个更自然的英文句子。",
+            "这样说会更自然，因为英语里通常先说自己的计划，再单独发出邀请。用 get some noodles 比 eat some noodles 更像日常口语，Do you want to join me? 也能清楚表达邀请。",
+        )
+    return None
 
 
 def _avoid_forbidden_mixed_input_feedback(

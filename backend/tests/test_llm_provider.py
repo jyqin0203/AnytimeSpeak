@@ -715,6 +715,54 @@ def test_feedback_sanitizes_forbidden_mixed_input_criticism(monkeypatch: pytest.
     assert "sad" in response.why or "feeling down" in response.why
 
 
+def test_feedback_removes_prompt_labels_and_repairs_repeated_original(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    original = "I want to eat some delicious noodles do you want to join me"
+
+    def fake_chat_completion(messages):
+        return """
+        {
+          "what_you_said": "I want to eat some delicious noodles do you want to join me",
+          "recommended_english": "I want to eat some delicious noodles do you want to join me",
+          "issue": "主要问题：这句话的意思已经清楚了，语音输入里的大小写或句号不用作为主要问题。",
+          "why": "主要问题：这句话的意思已经清楚了，语音输入里的大小写或句号不用作为主要问题。为什么：口语练习更应该关注表达是否自然、场景是否贴合，而不是只纠正识别文本里的标点。",
+          "more_natural_option": "I want to eat some delicious noodles do you want to join me",
+          "score": 85,
+          "score_breakdown": {
+            "grammar": 90,
+            "naturalness": 80,
+            "relevance": 100,
+            "clarity": 90
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message=original)
+    )
+
+    combined_feedback = f"{response.issue} {response.why}"
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.what_you_said == original
+    assert response.recommended_english != original
+    assert response.recommended_english == "I want to get some delicious noodles. Do you want to join me?"
+    assert response.more_natural_option == "I'm thinking of getting some delicious noodles. Would you like to come with me?"
+    assert "主要问题：" not in combined_feedback
+    assert "为什么：" not in combined_feedback
+    assert "计划" in response.why
+    assert "邀请" in response.why
+
+
 def test_feedback_ignores_punctuation_only_voice_transcript_corrections(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
