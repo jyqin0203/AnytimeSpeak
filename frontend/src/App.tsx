@@ -239,7 +239,7 @@ function App() {
               transcript: userMessage.text,
               referenceText: turnFeedback.recommendedEnglish,
               audioDurationMs: recording?.durationMs,
-              recognizedLanguage: "en-US",
+              recognizedLanguage: "mixed",
               audio: recording?.blob ?? null,
             })
               .then((pronunciation) => {
@@ -1009,10 +1009,13 @@ function Scenarios({
                 <span>{scenario.duration}</span>
               </div>
               <h3>{scenario.title}</h3>
-              <p>{scenario.description}</p>
-              <p className="scenario-story">{scenario.storyIntroZh}</p>
-              <p className="scenario-story-en">{scenario.storyIntroEn}</p>
-              <TagList items={scenario.focus} />
+              <p className="scenario-description">{scenario.description}</p>
+              <div className="scenario-story-box">
+                <span>情境前言</span>
+                <p className="scenario-story">{scenario.storyIntroZh}</p>
+                <p className="scenario-story-en">{scenario.storyIntroEn}</p>
+              </div>
+              <TagList items={scenario.focus} className="scenario-focus-tags" />
               <dl>
                 <div>
                   <dt>AI 角色</dt>
@@ -1087,9 +1090,9 @@ function Practice({
   const playbackRef = useRef<HTMLAudioElement | null>(null);
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
   const voiceRecorder = useVoiceRecorder();
-  // Use Doubao ASR when configured; otherwise falls back to browser SpeechRecognition.
-  // The lang for Doubao is "zh-CN" (mixed Chinese-English); browser uses "en-US".
-  const speechInputLang = asrProvider.id === "doubao-asr" ? "zh-CN" : "en-US";
+  // Use zh-CN for both Doubao and browser ASR so the demo can keep Chinese,
+  // English, and mixed Chinese-English transcripts instead of forcing English.
+  const speechInputLang = "zh-CN";
   const speechInput = useSpeechInput({
     provider: asrProvider,
     lang: speechInputLang,
@@ -1501,9 +1504,9 @@ function StatusBanner({
   );
 }
 
-function TagList({ items }: { items: string[] }) {
+function TagList({ items, className = "" }: { items: string[]; className?: string }) {
   return (
-    <div className="focus-tags">
+    <div className={`focus-tags ${className}`.trim()}>
       {items.map((item) => (
         <span key={item}>{item}</span>
       ))}
