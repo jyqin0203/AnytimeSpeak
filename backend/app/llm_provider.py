@@ -92,7 +92,7 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
     try:
         raw_content = _request_chat_completion(_chat_prompt(request), timeout_seconds=CHAT_TIMEOUT_SECONDS)
         data = _chat_data_from_llm(raw_content)
-        reply = _chat_message_from_data(data.get("reply"))
+        reply = _chat_message_from_data(_first_present(data, "reply", "message", "assistant_reply", "content", "text"))
         if _chat_reply_repeats_history(reply, _conversation_history(request)):
             raise ValueError("Chat reply repeated the previous assistant turn.")
         response = ChatResponse(
@@ -480,48 +480,89 @@ def _chat_message_from_data(data: Any) -> ChatMessage:
 def _feedback_from_data(data: Any) -> FeedbackResponse:
     if not isinstance(data, dict):
         raise ValueError("Feedback must be a JSON object.")
-    if "what_you_said" in data:
-        score = int(data["score"])
-        recommended_english = _clean_llm_text(data["recommended_english"], FEEDBACK_MEDIUM_MAX_CHARS)
-        more_natural_option = _clean_llm_text(data["more_natural_option"], FEEDBACK_MEDIUM_MAX_CHARS)
-        why = _clean_llm_text(data["why"], FEEDBACK_MEDIUM_MAX_CHARS)
-        response = FeedbackResponse(
-            what_you_said=str(data["what_you_said"]),
-            user_intent=_clean_llm_text(data["user_intent"], FEEDBACK_SHORT_MAX_CHARS),
-            recommended_english=recommended_english,
-            issue=_clean_llm_text(data["issue"], FEEDBACK_SHORT_MAX_CHARS),
-            why=why,
-            more_natural_option=more_natural_option,
-            score=score,
-            score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
-            provider="llm",
-            corrected_sentence=recommended_english,
-            better_expression=more_natural_option,
-            user_intent_zh=_optional_string(data.get("user_intent"), FEEDBACK_SHORT_MAX_CHARS),
-            code_switching_tip=why,
+    score = _score_from_data(data)
+    recommended_english = _clean_llm_text(
+        _first_present(
+            data,
+            "recommended_english",
+            "recommended_expression",
+            "corrected_sentence",
+            "correction",
+            "suggested_sentence",
+        ),
+        FEEDBACK_MEDIUM_MAX_CHARS,
+    )
+    more_natural_option = _clean_llm_text(
+        _first_present(
+            data,
+            "more_natural_option",
+            "better_version",
+            "better_expression",
+            "natural_expression",
+            "more_natural",
+        ),
+        FEEDBACK_MEDIUM_MAX_CHARS,
+    )
+    issue = _clean_llm_text(_first_present(data, "issue", "main_issue", "problem", "focus"), FEEDBACK_SHORT_MAX_CHARS)
+    why = _clean_llm_text(
+        _first_optional(
+            data,
+            "why",
+            "explanation",
+            "reason",
+            "why_it_is_more_natural",
+            "code_switching_tip",
         )
-        return _avoid_punctuation_only_feedback(response)
-
-    score = int(data["score"])
-    corrected_sentence = _clean_llm_text(data["corrected_sentence"], FEEDBACK_MEDIUM_MAX_CHARS)
-    better_expression = _clean_llm_text(data["better_expression"], FEEDBACK_MEDIUM_MAX_CHARS)
-    issue = _clean_llm_text(data["issue"], FEEDBACK_SHORT_MAX_CHARS)
+        or issue,
+        FEEDBACK_MEDIUM_MAX_CHARS,
+    )
+    user_intent = _optional_string(
+        _first_optional(data, "user_intent", "user_intent_zh", "intent", "meaning"),
+        FEEDBACK_SHORT_MAX_CHARS,
+    ) or ""
     response = FeedbackResponse(
-        what_you_said=str(data.get("what_you_said", "")),
-        user_intent=_optional_string(data.get("user_intent_zh"), FEEDBACK_SHORT_MAX_CHARS) or "",
-        recommended_english=corrected_sentence,
+        what_you_said=str(_first_optional(data, "what_you_said", "original_text", "user_message", "latest_user_message") or ""),
+        user_intent=user_intent,
+        recommended_english=recommended_english,
         issue=issue,
-        why=_optional_string(data.get("code_switching_tip"), FEEDBACK_MEDIUM_MAX_CHARS) or issue,
-        more_natural_option=better_expression,
+        why=why,
+        more_natural_option=more_natural_option,
         score=score,
         score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
         provider="llm",
-        corrected_sentence=corrected_sentence,
-        better_expression=better_expression,
-        user_intent_zh=_optional_string(data.get("user_intent_zh"), FEEDBACK_SHORT_MAX_CHARS),
-        code_switching_tip=_optional_string(data.get("code_switching_tip"), FEEDBACK_MEDIUM_MAX_CHARS),
+        corrected_sentence=recommended_english,
+        better_expression=more_natural_option,
+        user_intent_zh=user_intent,
+        code_switching_tip=why,
     )
     return _avoid_punctuation_only_feedback(response)
+
+
+def _first_present(data: dict[str, Any], *keys: str) -> Any:
+    value = _first_optional(data, *keys)
+    if value is not None:
+        return value
+    raise ValueError(f"Missing required field. Expected one of: {', '.join(keys)}")
+
+
+def _first_optional(data: dict[str, Any], *keys: str) -> Any | None:
+    for key in keys:
+        value = data.get(key)
+        if value is not None:
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value
+    return None
+
+
+def _score_from_data(data: dict[str, Any]) -> int:
+    if data.get("score") is not None:
+        return _clamp_breakdown_value(data["score"])
+    breakdown = data.get("score_breakdown")
+    if isinstance(breakdown, dict) and breakdown:
+        values = [_clamp_breakdown_value(value) for value in breakdown.values()]
+        return round(sum(values) / len(values))
+    raise ValueError("Feedback score is required.")
 
 
 def _avoid_punctuation_only_feedback(response: FeedbackResponse) -> FeedbackResponse:

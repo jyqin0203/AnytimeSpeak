@@ -360,6 +360,28 @@ def test_chat_accepts_plain_text_llm_reply_instead_of_json_parse_fallback(monkey
     assert response.reply.content == "I understand. What would you like to practice next?"
 
 
+def test_chat_accepts_common_content_field_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return '{"content": "I am sorry to hear that. What happened?"}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="daily_conversation", latest_user_message="I am so sad.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.content == "I am sorry to hear that. What happened?"
+
+
 def test_chat_falls_back_when_llm_repeats_previous_assistant_turn(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
@@ -389,6 +411,47 @@ def test_chat_falls_back_when_llm_repeats_previous_assistant_turn(monkeypatch: p
     assert response.provider == "mock"
     assert response.fallback_reason == "schema_validation_failed"
     assert response.reply.content != repeated
+
+
+def test_feedback_accepts_frontend_wording_aliases_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages):
+        return """
+        {
+          "original_text": "I am so 伤心.",
+          "intent": "用户想表达自己现在很伤心。",
+          "recommended_expression": "I'm feeling really sad right now.",
+          "main_issue": "意思表达清楚，可以把情绪词说得更自然。",
+          "explanation": "你的意思表达清楚了。口语里可以用 I'm feeling really sad right now 来表达当下状态。",
+          "better_version": "I've been feeling really down lately.",
+          "score_breakdown": {
+            "grammar": 86,
+            "naturalness": 78,
+            "relevance": 92,
+            "clarity": 84
+          },
+          "provider": "llm"
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily_conversation", latest_user_message="I am so 伤心.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.what_you_said == "I am so 伤心."
+    assert response.recommended_english == "I'm feeling really sad right now."
+    assert response.more_natural_option == "I've been feeling really down lately."
+    assert response.score == 85
 
 
 def test_feedback_ignores_punctuation_only_voice_transcript_corrections(monkeypatch: pytest.MonkeyPatch):
