@@ -433,8 +433,9 @@ export function createLocalSummary(messages: Message[], feedback: Feedback[]): S
 
 function sanitizeAiText(text: string): string {
   return text
-    .replace(/—|―/g, " - ") // em dash → spaced hyphen
-    .replace(/–/g, "-")           // en dash → hyphen
+    .replace(/\s*[—―]\s*/g, ", ")
+    .replace(/\s+–\s+/g, ", ")
+    .replace(/\s+-\s+/g, ", ")
     .replace(/[ \t]{2,}/g, " ")
     .trim();
 }

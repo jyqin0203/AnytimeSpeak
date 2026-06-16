@@ -90,10 +90,8 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
         return _mock_chat_reply(request, config_reason)
 
     try:
-        data = _json_from_llm(
-            _request_chat_completion(_chat_prompt(request), timeout_seconds=CHAT_TIMEOUT_SECONDS),
-            "chat",
-        )
+        raw_content = _request_chat_completion(_chat_prompt(request), timeout_seconds=CHAT_TIMEOUT_SECONDS)
+        data = _chat_data_from_llm(raw_content)
         reply = _chat_message_from_data(data.get("reply"))
         if _chat_reply_repeats_history(reply, _conversation_history(request)):
             raise ValueError("Chat reply repeated the previous assistant turn.")
@@ -327,6 +325,10 @@ def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
                     "For emotion words, focus on choices such as sad, upset, feeling down, "
                     "anxious, stressed, 'I'm feeling...', 'I've been feeling...', right now, "
                     "or lately. why must be 2-4 short Chinese sentences at most. "
+                    "Because many learner turns come from speech recognition, do not treat "
+                    "missing punctuation, capitalization, or sentence-final periods as the main "
+                    "issue. Do not recommend a sentence only to add punctuation or capitalize "
+                    "the first word unless the meaning is otherwise unclear. "
                     "Use plain punctuation only: no em dashes, repeated punctuation, Markdown, "
                     "bullet lists, separator hyphens, or long paragraphs. "
                     "Never reply with generic filler such as 'No major grammar issue'. Even when "
@@ -432,6 +434,20 @@ def _json_from_llm(content: str, operation: str) -> dict[str, Any]:
     raise LLMResponseParseError("LLM response JSON parsing failed.") from last_error
 
 
+def _chat_data_from_llm(content: str) -> dict[str, Any]:
+    try:
+        return _json_from_llm(content, "chat")
+    except LLMResponseParseError:
+        cleaned = _clean_llm_text(content, CHAT_REPLY_MAX_CHARS)
+        if not cleaned:
+            raise
+        logger.warning(
+            "llm_provider: chat_plain_text_response response_length=%s",
+            len(content),
+        )
+        return {"reply": {"role": "assistant", "content": cleaned}}
+
+
 def _code_fence_contents(content: str) -> list[str]:
     return [match.group(1) for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", content, re.IGNORECASE)]
 
@@ -469,7 +485,7 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
         recommended_english = _clean_llm_text(data["recommended_english"], FEEDBACK_MEDIUM_MAX_CHARS)
         more_natural_option = _clean_llm_text(data["more_natural_option"], FEEDBACK_MEDIUM_MAX_CHARS)
         why = _clean_llm_text(data["why"], FEEDBACK_MEDIUM_MAX_CHARS)
-        return FeedbackResponse(
+        response = FeedbackResponse(
             what_you_said=str(data["what_you_said"]),
             user_intent=_clean_llm_text(data["user_intent"], FEEDBACK_SHORT_MAX_CHARS),
             recommended_english=recommended_english,
@@ -484,12 +500,13 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
             user_intent_zh=_optional_string(data.get("user_intent"), FEEDBACK_SHORT_MAX_CHARS),
             code_switching_tip=why,
         )
+        return _avoid_punctuation_only_feedback(response)
 
     score = int(data["score"])
     corrected_sentence = _clean_llm_text(data["corrected_sentence"], FEEDBACK_MEDIUM_MAX_CHARS)
     better_expression = _clean_llm_text(data["better_expression"], FEEDBACK_MEDIUM_MAX_CHARS)
     issue = _clean_llm_text(data["issue"], FEEDBACK_SHORT_MAX_CHARS)
-    return FeedbackResponse(
+    response = FeedbackResponse(
         what_you_said=str(data.get("what_you_said", "")),
         user_intent=_optional_string(data.get("user_intent_zh"), FEEDBACK_SHORT_MAX_CHARS) or "",
         recommended_english=corrected_sentence,
@@ -504,6 +521,48 @@ def _feedback_from_data(data: Any) -> FeedbackResponse:
         user_intent_zh=_optional_string(data.get("user_intent_zh"), FEEDBACK_SHORT_MAX_CHARS),
         code_switching_tip=_optional_string(data.get("code_switching_tip"), FEEDBACK_MEDIUM_MAX_CHARS),
     )
+    return _avoid_punctuation_only_feedback(response)
+
+
+def _avoid_punctuation_only_feedback(response: FeedbackResponse) -> FeedbackResponse:
+    if not _is_punctuation_only_change(response.what_you_said, response.recommended_english):
+        return response
+    if not _mentions_punctuation_or_capitalization(response.issue, response.why):
+        return response
+
+    original = _clean_llm_text(response.what_you_said, FEEDBACK_MEDIUM_MAX_CHARS)
+    response.recommended_english = original
+    response.corrected_sentence = original
+    response.more_natural_option = original
+    response.better_expression = original
+    response.issue = "这句话的意思已经清楚了，语音输入里的大小写或句号不用作为主要问题。"
+    response.why = "口语练习更应该关注表达是否自然、场景是否贴合，而不是只纠正识别文本里的标点。"
+    response.code_switching_tip = response.why
+    return response
+
+
+def _is_punctuation_only_change(original: str, recommended: str) -> bool:
+    def normalize(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    return bool(original.strip()) and normalize(original) == normalize(recommended)
+
+
+def _mentions_punctuation_or_capitalization(*texts: str) -> bool:
+    combined = " ".join(texts).lower()
+    markers = (
+        "punctuation",
+        "capitalize",
+        "capitalization",
+        "period",
+        "comma",
+        "标点",
+        "句号",
+        "逗号",
+        "大小写",
+        "首字母",
+    )
+    return any(marker in combined for marker in markers)
 
 
 def _score_breakdown_from_data(breakdown: Any, fallback_score: int) -> FeedbackScoreBreakdown:
