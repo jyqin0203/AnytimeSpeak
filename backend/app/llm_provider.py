@@ -679,7 +679,8 @@ def _feedback_from_data(data: Any, request: FeedbackRequest | None = None) -> Fe
     )
     response = _avoid_forbidden_mixed_input_feedback(response, request)
     response = _avoid_repeated_original_feedback(response, request)
-    return _avoid_punctuation_only_feedback(response)
+    response = _avoid_punctuation_only_feedback(response)
+    return _avoid_internal_prompt_feedback(response)
 
 
 def _clean_feedback_field_text(value: Any, max_chars: int, *, field: str) -> str:
@@ -847,8 +848,18 @@ def _avoid_punctuation_only_feedback(response: FeedbackResponse) -> FeedbackResp
     response.corrected_sentence = original
     response.more_natural_option = original
     response.better_expression = original
-    response.issue = "这句话的意思已经清楚了，语音输入里的大小写或句号不用作为主要问题。"
-    response.why = "口语练习更应该关注表达是否自然、场景是否贴合，而不是只纠正识别文本里的标点。"
+    response.issue = "这句话的意思已经清楚了，可以把重点放在语气和场景里的自然表达上。"
+    response.why = "如果想说得更自然，可以根据当前场景补充一点礼貌语气或具体信息，让对方更容易接话。"
+    response.code_switching_tip = response.why
+    return response
+
+
+def _avoid_internal_prompt_feedback(response: FeedbackResponse) -> FeedbackResponse:
+    if not _mentions_internal_feedback_rule(response.issue, response.why):
+        return response
+
+    response.issue = "这句话的意思已经清楚了，可以再加一点语气或具体信息，让表达更像自然口语。"
+    response.why = "这样能保留你原本的意思，同时让对方更容易理解你的态度，也更容易继续接话。"
     response.code_switching_tip = response.why
     return response
 
@@ -873,6 +884,22 @@ def _mentions_punctuation_or_capitalization(*texts: str) -> bool:
         "逗号",
         "大小写",
         "首字母",
+    )
+    return any(marker in combined for marker in markers)
+
+
+def _mentions_internal_feedback_rule(*texts: str) -> bool:
+    combined = " ".join(texts)
+    markers = (
+        "语音输入",
+        "识别文本",
+        "不用作为主要问题",
+        "不要作为主要问题",
+        "不作为主要问题",
+        "只纠正",
+        "大小写",
+        "句号",
+        "标点",
     )
     return any(marker in combined for marker in markers)
 

@@ -851,8 +851,15 @@ def test_feedback_ignores_punctuation_only_voice_transcript_corrections(monkeypa
     assert response.provider == "llm"
     assert response.recommended_english == "and would you like a drink"
     assert response.more_natural_option == "and would you like a drink"
-    assert "标点" in response.why
-    assert "主要问题" in response.issue
+    combined_feedback = f"{response.issue} {response.why}"
+    assert "语音输入" not in combined_feedback
+    assert "识别文本" not in combined_feedback
+    assert "大小写" not in combined_feedback
+    assert "句号" not in combined_feedback
+    assert "标点" not in combined_feedback
+    assert "主要问题" not in combined_feedback
+    assert "自然表达" in combined_feedback
+    assert "接话" in combined_feedback
 
 
 def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():

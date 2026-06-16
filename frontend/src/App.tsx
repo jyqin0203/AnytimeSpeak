@@ -1235,8 +1235,8 @@ function Practice({
                 </div>
                 <div>
                   <span>为什么这样更自然</span>
-                  <p>主要问题：{latestFeedback.issue}</p>
-                  <p>为什么：{latestFeedback.why}</p>
+                  <p>{latestFeedback.issue}</p>
+                  <p>{latestFeedback.why}</p>
                 </div>
                 <div>
                   <span>更自然的说法</span>
