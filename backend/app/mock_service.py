@@ -84,9 +84,10 @@ def _select_story_seed(config: ScenarioPromptConfig, requested_seed_id: str | No
 
 
 def start_session(request: StartSessionRequest) -> PracticeSession:
-    config = get_scenario_prompt_config(request.scenario_id)
+    scenario_id = _canonical_scenario_id(request.scenario_id)
+    config = get_scenario_prompt_config(scenario_id)
     seed = _select_story_seed(config, request.story_seed_id)
-    base_scenario = _scenario_for(request.scenario_id)
+    base_scenario = _scenario_for(scenario_id)
 
     scenario = base_scenario.model_copy(
         update={
@@ -151,6 +152,15 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
 
     issue_notes: list[str] = []
     why_notes: list[str] = []
+
+    if _detect_daily_plan_invitation(message):
+        naturalness -= 10
+        clarity -= 8
+        issue_notes.append("你的意思能理解，可以把几个动作按更清楚的顺序整理成自然的邀请。")
+        why_notes.append(
+            "几个动作连在一起时，英语里通常会按“时间 → 计划 → 邀请”的顺序表达。"
+            "先说 after lunch，再说 I’m planning to do my homework，最后用 Do you want to join me? 发出邀请，会更自然也更容易理解。"
+        )
 
     if has_chinese:
         naturalness -= 14
@@ -278,9 +288,19 @@ def create_summary(request: SummaryRequest) -> SummaryResponse:
 
 
 def _scenario_for(scenario_id: str) -> Scenario:
+    scenario_id = _canonical_scenario_id(scenario_id)
     if scenario_id == "restaurant-ordering":
         scenario_id = "restaurant"
     return SCENARIOS.get(scenario_id, SCENARIOS["interview"])
+
+
+def _canonical_scenario_id(scenario_id: str) -> str:
+    aliases = {
+        "daily": "daily_conversation",
+        "restaurant-ordering": "restaurant",
+        "ordering_food": "restaurant",
+    }
+    return aliases.get(scenario_id, scenario_id)
 
 
 def _conversation_history(request: ChatRequest) -> list[ChatMessage]:
@@ -375,6 +395,12 @@ def _scenario_reply(
                 history,
                 "Sure. Would you like that for here or to go?",
             )
+        if _detect_restaurant_preference(user_message):
+            return _avoid_repeated_reply(
+                "Sure. I can recommend something mild. Would you prefer chicken, beef, or vegetables?",
+                history,
+                "Got it. Would you like a mild noodle dish or a rice dish?",
+            )
         return _avoid_repeated_reply(
             (
                 "Sure. Would you like that for here or to go, or would you like a drink "
@@ -426,6 +452,12 @@ def _scenario_reply(
         )
 
     if scenario_id == "daily_conversation":
+        if _detect_daily_plan_invitation(user_message):
+            return _avoid_repeated_reply(
+                "Sure, that sounds like a plan. What time do you want to go?",
+                history,
+                "That sounds nice. Are you thinking about lunch first and then homework?",
+            )
         if "movie" in lowered:
             return _avoid_repeated_reply(
                 "That sounds relaxing. What movie did you watch, and did you enjoy it?",
@@ -441,8 +473,7 @@ def _scenario_reply(
     if "project" in lowered or "experience" in lowered:
         return _avoid_repeated_reply(
             (
-                "Thanks for sharing that. Could you tell me one concrete example of your "
-                "work and how it helped the team?"
+                "Thanks for sharing that project. What challenge did you face, and what result did you achieve?"
             ),
             history,
             "What challenge did you face in that project?",
@@ -516,6 +547,49 @@ def _negative_emotion_reply(scenario_id: str) -> str:
     if scenario_id in {"restaurant", "ordering_food"}:
         return "I'm sorry you're feeling that way. Would you like a moment, or can I help you choose something comforting?"
     return "I'm sorry you're feeling that way. What happened?"
+
+
+_DAILY_PLAN_INVITATION_MARKERS = (
+    "lunch",
+    "food",
+    "homework",
+    "class",
+    "go with me",
+    "come with me",
+    "want to come",
+    "join me",
+    "delicious",
+    "一起",
+    "作业",
+    "午饭",
+    "午餐",
+    "吃饭",
+)
+
+
+def _detect_daily_plan_invitation(message: str) -> bool:
+    lowered = message.lower()
+    has_plan = any(marker in lowered or marker in message for marker in _DAILY_PLAN_INVITATION_MARKERS)
+    has_sequence_or_invite = any(
+        marker in lowered
+        for marker in ("after", "then", "go with me", "come with me", "join me", "do you want")
+    )
+    return has_plan and has_sequence_or_invite
+
+
+def _detect_restaurant_preference(message: str) -> bool:
+    lowered = message.lower()
+    preference_markers = (
+        "not too spicy",
+        "mild",
+        "spicy",
+        "recommend",
+        "something",
+        "preference",
+        "dish",
+        "allergy",
+    )
+    return any(marker in lowered for marker in preference_markers)
 
 
 def _default_better_expression(scenario_id: str) -> str:
@@ -639,7 +713,7 @@ _SCENARIO_TOPIC_KEYWORDS: dict[str, list[str]] = {
     ],
     "ordering_food": [
         "order", "menu", "drink", "food", "recommend", "sandwich", "coffee", "takeout",
-        "table", "dish", "allerg", "点", "餐", "推荐", "外卖", "菜", "饮料",
+        "table", "dish", "allerg", "spicy", "mild", "preference", "点", "餐", "推荐", "外卖", "菜", "饮料",
     ],
     "meeting": [
         "progress", "blocker", "update", "task", "deadline", "team", "api", "sync",
@@ -651,7 +725,8 @@ _SCENARIO_TOPIC_KEYWORDS: dict[str, list[str]] = {
     ],
     "daily_conversation": [
         "weekend", "movie", "class", "homework", "plan", "friend", "classmate", "coffee",
-        "relax", "recently", "project", "projects", "ai", "周末", "电影", "同学", "计划", "作业",
+        "relax", "recently", "project", "projects", "ai", "lunch", "food", "join", "go with me",
+        "周末", "电影", "同学", "计划", "作业",
         "聊天", "最近", "项目", "应用开发",
     ],
 }
@@ -660,6 +735,8 @@ _SCENARIO_TOPIC_KEYWORDS: dict[str, list[str]] = {
 def _is_on_topic(scenario: Scenario, message: str) -> bool:
     stripped = message.strip()
     if len(stripped) <= 2:
+        return True
+    if _detect_negative_emotion(stripped):
         return True
 
     lowered = stripped.lower()
@@ -726,6 +803,10 @@ def _compose_recommended_english(
     lowered = message.lower()
     if incomplete_hits:
         return incomplete_hits[0][1]
+    if _detect_daily_plan_invitation(message):
+        return "Of course! After lunch, I’m planning to do my homework. Do you want to join me?"
+    if scenario.id == "restaurant" and _detect_restaurant_preference(message):
+        return "I’d like something that isn’t too spicy. What would you recommend?"
     if "what do you do recently" in lowered:
         return "What have you been up to recently?"
     if "recently completed" in lowered and "ai" in lowered and ("项目" in message or "应用开发" in message):
@@ -885,6 +966,10 @@ def _extract_known_fragments(message: str) -> list[str]:
 def _compose_more_natural_option(scenario: Scenario, recommended_english: str) -> str:
     if "sad" in recommended_english.lower() or "upset" in recommended_english.lower() or "down" in recommended_english.lower():
         return "I've been feeling really down lately."
+    if "after lunch" in recommended_english.lower() and "homework" in recommended_english.lower():
+        return "Sure! After lunch, I’m going to do my homework. Do you want to come with me?"
+    if scenario.id == "restaurant" and "spicy" in recommended_english.lower():
+        return "Could you recommend a mild dish for me?"
     if recommended_english.endswith("?"):
         return recommended_english
     base = recommended_english.rstrip(".!?")

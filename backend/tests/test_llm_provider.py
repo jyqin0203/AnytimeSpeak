@@ -300,6 +300,55 @@ def test_json_parser_accepts_markdown_code_fence_and_text():
     assert parsed == {"provider": "llm", "score": 88}
 
 
+def test_json_parser_accepts_plain_json():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm('{"reply":{"role":"assistant","content":"Hi."}}', "chat")
+
+    assert parsed == {"reply": {"role": "assistant", "content": "Hi."}}
+
+
+def test_json_parser_extracts_first_valid_object_with_surrounding_text():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        'Sure, here is the JSON: {"reply":{"role":"assistant","content":"What happened?"}} Thanks.',
+        "chat",
+    )
+
+    assert parsed == {"reply": {"role": "assistant", "content": "What happened?"}}
+
+
+def test_json_parser_uses_first_valid_object_when_later_text_has_braces():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        'Result: {"provider":"llm","score":88} Note: {not valid json}',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_feedback_falls_back_on_invalid_json_without_crashing(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", lambda _messages: "{not valid json")
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message="I am so 伤心.")
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "json_parse_failed"
+    assert response.recommended_english
+    assert response.why
+
+
 def test_json_parser_logs_operation_without_response_content(caplog: pytest.LogCaptureFixture):
     import app.llm_provider as llm_provider
 
