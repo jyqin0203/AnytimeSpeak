@@ -1046,13 +1046,18 @@ function Practice({
     if (speechInput.isListening || speechInput.isRestarting) {
       speechInput.stopListening();
       const transcript = latestTranscriptRef.current.trim() || speechInput.transcript.trim();
-      void voiceRecorder.stopRecording().then((recording) => {
-        if (transcript) {
-          onSendText(transcript, recording);
+      void voiceRecorder
+        .stopRecording()
+        .then((recording) => {
+          if (transcript) {
+            onSendText(transcript, recording);
+          }
+        })
+        .finally(() => {
           speechInput.resetTranscript();
           latestTranscriptRef.current = "";
-        }
-      });
+          onInput("");
+        });
       return;
     }
 
