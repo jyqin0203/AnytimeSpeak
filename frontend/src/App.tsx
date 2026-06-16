@@ -1020,7 +1020,7 @@ function Practice({
   const latestScore = latestFeedback?.score ?? null;
   const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
   const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
-  const lastSpokenAiId = useRef<number | null>(null);
+  const lastSpokenAiKey = useRef<string | null>(null);
   const latestTranscriptRef = useRef("");
   const playbackRef = useRef<HTMLAudioElement | null>(null);
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
@@ -1037,8 +1037,10 @@ function Practice({
   const isRecording = speechInput.isListening || speechInput.isRestarting;
 
   useEffect(() => {
-    if (!latestAiMessage || latestAiMessage.isLoading || latestAiMessage.id === lastSpokenAiId.current) return;
-    lastSpokenAiId.current = latestAiMessage.id;
+    if (!latestAiMessage || latestAiMessage.isLoading) return;
+    const spokenKey = `${latestAiMessage.id}:${latestAiMessage.text}`;
+    if (spokenKey === lastSpokenAiKey.current) return;
+    lastSpokenAiKey.current = spokenKey;
     speechOutput.speak(latestAiMessage.text);
   }, [latestAiMessage, speechOutput]);
 
