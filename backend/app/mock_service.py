@@ -123,7 +123,7 @@ def resolve_scenario(session_id: str | None, scenario_id: str) -> Scenario:
 def create_chat_reply(request: ChatRequest) -> ChatResponse:
     scenario = resolve_scenario(request.session_id, request.scenario_id)
     user_message = _latest_user_text(request)
-    reply_text = _scenario_reply(scenario.id, user_message)
+    reply_text = _scenario_reply(scenario.id, user_message, _conversation_history(request))
 
     return ChatResponse(
         session_id=request.session_id or f"session_{uuid4().hex[:12]}",
@@ -142,6 +142,7 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
     on_topic = _is_on_topic(scenario, message)
     chinglish_hits = _detect_chinglish(message)
     grammar_hits = _detect_grammar_issues(message)
+    incomplete_hits = _detect_incomplete_expression(message)
 
     grammar = 90
     naturalness = 90
@@ -163,6 +164,13 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
         clarity -= 4
         issue_notes.append(f"注意 “{pattern}” 这里的用法，更地道的说法是 “{fix}”。")
         why_notes.append("时态、单复数和介词搭配是口语里最容易被听出来的细节，调整后会显得更专业、更自然。")
+
+    if incomplete_hits:
+        pattern, fix = incomplete_hits[0]
+        grammar -= 10
+        clarity -= 12
+        issue_notes.append(f"“{pattern}” 还缺少结尾信息，可以补成 “{fix}”。")
+        why_notes.append("你的意思能看出来是在询问饮品，但句子停在 with 后面会让对方等后续内容。补上 that 或直接改成完整问句，听起来更自然。")
 
     if "what do you do recently" in message.lower():
         naturalness -= 8
@@ -193,7 +201,14 @@ def create_feedback(request: FeedbackRequest) -> FeedbackResponse:
     issue = " ".join(issue_notes[:2])
     why = " ".join(why_notes[:2])
 
-    recommended_english = _compose_recommended_english(scenario, message, has_chinese, grammar_hits, chinglish_hits)
+    recommended_english = _compose_recommended_english(
+        scenario,
+        message,
+        has_chinese,
+        grammar_hits,
+        chinglish_hits,
+        incomplete_hits,
+    )
     more_natural_option = _compose_more_natural_option(scenario, recommended_english)
     user_intent = _describe_user_intent(scenario, message, has_chinese)
 
@@ -340,7 +355,11 @@ def _overall_score(breakdown: FeedbackScoreBreakdown) -> int:
     return round(weighted)
 
 
-def _scenario_reply(scenario_id: str, user_message: str) -> str:
+def _scenario_reply(
+    scenario_id: str,
+    user_message: str,
+    history: list[ChatMessage] | None = None,
+) -> str:
     lowered = user_message.lower()
 
     if _detect_negative_emotion(user_message):
@@ -348,50 +367,116 @@ def _scenario_reply(scenario_id: str, user_message: str) -> str:
 
     if scenario_id == "restaurant":
         if "chicken sandwich" in lowered:
-            return (
-                "Of course. I can make the chicken sandwich without onions. "
-                "For a drink, I recommend iced tea or lemonade. Would you like either of those?"
+            return _avoid_repeated_reply(
+                (
+                    "Of course. I can make the chicken sandwich without onions. "
+                    "Would you like a drink with that?"
+                ),
+                history,
+                "Sure. Would you like that for here or to go?",
             )
-        return (
-            "Sure. Would you like that for here or to go, and would you like a drink "
-            "with your order?"
+        return _avoid_repeated_reply(
+            (
+                "Sure. Would you like that for here or to go, or would you like a drink "
+                "with that?"
+            ),
+            history,
+            "Got it. Would you like anything else with your order?",
         )
 
     if scenario_id == "meeting":
         if "预约" in user_message or "schedule" in lowered or "meeting tomorrow" in lowered:
-            return (
-                "That sounds like a scheduling topic. What time works best for the "
-                "meeting tomorrow, and who needs to join?"
+            return _avoid_repeated_reply(
+                (
+                    "That sounds like a scheduling topic. What time works best for the "
+                    "meeting tomorrow?"
+                ),
+                history,
+                "Who needs to join that meeting?",
             )
         if "api" in lowered or "blocker" in lowered:
-            return (
-                "Thanks for the update. It sounds like the API format is blocking you. "
-                "What specific data fields do you need from the backend team?"
+            return _avoid_repeated_reply(
+                (
+                    "Thanks for the update. It sounds like the API format is blocking you. "
+                    "What specific data fields do you need?"
+                ),
+                history,
+                "What support do you need from the backend team?",
             )
-        return "Thanks for the update. What is your main blocker or next step for this week?"
+        return _avoid_repeated_reply(
+            "Thanks for the update. What is your main blocker or next step for this week?",
+            history,
+            "What support do you need from the team this week?",
+        )
 
     if scenario_id == "travel":
         if "check in" in lowered or "booking" in lowered or "reservation" in lowered:
-            return (
-                "Let me check that for you. Could I have your name and a sample booking "
-                "number, please?"
+            return _avoid_repeated_reply(
+                (
+                    "Let me check that for you. Could I have your name and a sample booking "
+                    "number, please?"
+                ),
+                history,
+                "What time did you arrive at the hotel?",
             )
-        return "Sure, I can help with that. What destination or travel detail do you need?"
+        return _avoid_repeated_reply(
+            "Sure, I can help with that. What destination or travel detail do you need?",
+            history,
+            "What would you like help with first?",
+        )
 
     if scenario_id == "daily_conversation":
         if "movie" in lowered:
-            return "That sounds relaxing. What movie did you watch, and did you enjoy it?"
-        return "That sounds good. Could you tell me a little more about your day?"
+            return _avoid_repeated_reply(
+                "That sounds relaxing. What movie did you watch, and did you enjoy it?",
+                history,
+                "What kind of movies do you usually like?",
+            )
+        return _avoid_repeated_reply(
+            "I hear you. What has been on your mind today?",
+            history,
+            "Could you tell me a little more about what happened?",
+        )
 
     if "project" in lowered or "experience" in lowered:
-        return (
-            "Thanks for sharing that. Could you tell me one concrete example of your "
-            "work and how it helped the team make a decision?"
+        return _avoid_repeated_reply(
+            (
+                "Thanks for sharing that. Could you tell me one concrete example of your "
+                "work and how it helped the team?"
+            ),
+            history,
+            "What challenge did you face in that project?",
         )
-    return (
-        "Thanks for the introduction. Could you share one relevant project or experience "
-        "that shows why you are a good fit for this role?"
+    return _avoid_repeated_reply(
+        (
+            "Thanks for the introduction. Could you share one relevant project or experience "
+            "that shows why you are a good fit for this role?"
+        ),
+        history,
+        "What kind of role are you most interested in?",
     )
+
+
+def _avoid_repeated_reply(
+    candidate: str,
+    history: list[ChatMessage] | None,
+    alternative: str,
+) -> str:
+    last_assistant = _last_assistant_text(history)
+    if last_assistant and _normalize_text(last_assistant) == _normalize_text(candidate):
+        return alternative
+    return candidate
+
+
+def _last_assistant_text(history: list[ChatMessage] | None) -> str:
+    for message in reversed(history or []):
+        if message.role == "assistant":
+            return message.content
+    return ""
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
 
 
 _NEGATIVE_EMOTION_MARKERS = (
@@ -623,14 +708,24 @@ def _detect_grammar_issues(message: str) -> list[tuple[str, str]]:
     return [(pattern, fix) for pattern, fix in _GRAMMAR_PATTERNS if pattern in lowered]
 
 
+def _detect_incomplete_expression(message: str) -> list[tuple[str, str]]:
+    stripped = message.strip().rstrip(".!?").lower()
+    if stripped.endswith("would you like a drink with") or stripped.endswith("like a drink with"):
+        return [("would you like a drink with", "Would you like a drink with that?")]
+    return []
+
+
 def _compose_recommended_english(
     scenario: Scenario,
     message: str,
     has_chinese: bool,
     grammar_hits: list[tuple[str, str]],
     chinglish_hits: list[tuple[str, str]],
+    incomplete_hits: list[tuple[str, str]] | None = None,
 ) -> str:
     lowered = message.lower()
+    if incomplete_hits:
+        return incomplete_hits[0][1]
     if "what do you do recently" in lowered:
         return "What have you been up to recently?"
     if "recently completed" in lowered and "ai" in lowered and ("项目" in message or "应用开发" in message):
@@ -790,6 +885,8 @@ def _extract_known_fragments(message: str) -> list[str]:
 def _compose_more_natural_option(scenario: Scenario, recommended_english: str) -> str:
     if "sad" in recommended_english.lower() or "upset" in recommended_english.lower() or "down" in recommended_english.lower():
         return "I've been feeling really down lately."
+    if recommended_english.endswith("?"):
+        return recommended_english
     base = recommended_english.rstrip(".!?")
     return f"{base}. {_scenario_connector(scenario.scenario_id)}"
 

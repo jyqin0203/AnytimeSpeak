@@ -25,6 +25,7 @@ from app.schemas import (
 
 
 LLM_TIMEOUT_SECONDS = 90.0
+CHAT_TIMEOUT_SECONDS = 25.0
 CHAT_REPLY_MAX_CHARS = 260
 FEEDBACK_SHORT_MAX_CHARS = 90
 FEEDBACK_MEDIUM_MAX_CHARS = 140
@@ -89,11 +90,17 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
         return _mock_chat_reply(request, config_reason)
 
     try:
-        data = _json_from_llm(_request_chat_completion(_chat_prompt(request)), "chat")
+        data = _json_from_llm(
+            _request_chat_completion(_chat_prompt(request), timeout_seconds=CHAT_TIMEOUT_SECONDS),
+            "chat",
+        )
+        reply = _chat_message_from_data(data.get("reply"))
+        if _chat_reply_repeats_history(reply, _conversation_history(request)):
+            raise ValueError("Chat reply repeated the previous assistant turn.")
         response = ChatResponse(
             session_id=request.session_id or "llm-session",
             scenario_id=request.scenario_id,
-            reply=_chat_message_from_data(data.get("reply")),
+            reply=reply,
             provider="llm",
         )
         _log_provider_state("chat", "llm")
@@ -191,7 +198,10 @@ def _llm_config_fallback_reason() -> str | None:
     return None
 
 
-def _request_chat_completion(messages: list[dict[str, str]]) -> str:
+def _request_chat_completion(
+    messages: list[dict[str, str]],
+    timeout_seconds: float = LLM_TIMEOUT_SECONDS,
+) -> str:
     base_url = _llm_base_url().rstrip("/")
     endpoint = (
         base_url
@@ -211,7 +221,7 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
             "temperature": 0.3,
             "response_format": {"type": "json_object"},
         },
-        timeout=LLM_TIMEOUT_SECONDS,
+        timeout=timeout_seconds,
     )
     response.raise_for_status()
     payload = response.json()
@@ -258,7 +268,8 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
                     "positive stock phrases such as 'That sounds good', 'Great', 'Nice', "
                     "'Awesome', or 'Sounds fun'. "
                     "Use plain punctuation only: no em dashes, repeated punctuation, Markdown "
-                    "bullets, numbered lists, or overly formal coaching language. "
+                    "bullets, numbered lists, slash-heavy wording, separator hyphens, or overly "
+                    "formal coaching language. "
                     "If the learner's message is unclear, briefly acknowledge what you did "
                     "understand and ask one specific clarifying question. "
                     "If the learner drifts off-topic, respond naturally and briefly, then gently "
@@ -317,7 +328,7 @@ def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
                     "anxious, stressed, 'I'm feeling...', 'I've been feeling...', right now, "
                     "or lately. why must be 2-4 short Chinese sentences at most. "
                     "Use plain punctuation only: no em dashes, repeated punctuation, Markdown, "
-                    "bullet lists, or long paragraphs. "
+                    "bullet lists, separator hyphens, or long paragraphs. "
                     "Never reply with generic filler such as 'No major grammar issue'. Even when "
                     "the grammar is correct, comment on spoken naturalness, fit with the "
                     "scenario, or clarity, and suggest one concrete way to sound more like a "
@@ -372,7 +383,7 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
                     "items each; scenario_completion and next_practice_focus should each be one "
                     "short sentence. "
                     "Use plain punctuation only: no em dashes, repeated punctuation, Markdown, "
-                    "bullet markers inside strings, or long paragraphs. "
+                    "bullet markers inside strings, separator hyphens, or long paragraphs. "
                     "If the learner used Chinese-English mixed input multiple times, include a "
                     "practical 中英转换建议 in code_switching_advice. "
                     "Return JSON only with keys summary, strengths, repeated_issues, "
@@ -537,8 +548,9 @@ def _optional_string(value: Any, max_chars: int | None = None) -> str | None:
 
 def _clean_llm_text(value: Any, max_chars: int | None = None) -> str:
     text = str(value)
-    text = re.sub(r"[\u2014\u2015]", " - ", text)
-    text = re.sub(r"\s*\u2013\s*", "-", text)
+    text = re.sub(r"\s*[\u2014\u2015]\s*", ", ", text)
+    text = re.sub(r"\s+\u2013\s+", ", ", text)
+    text = re.sub(r"\s+-\s+", ", ", text)
     text = re.sub(r"([!?.,;:])\1+", r"\1", text)
     text = re.sub(r"\s+([!?.,;:])", r"\1", text)
     text = re.sub(r"[ \t\r\n]+", " ", text).strip()
@@ -583,6 +595,17 @@ def _latest_user_message(request: ChatRequest) -> str:
         if message.role == "user":
             return message.content
     return ""
+
+
+def _chat_reply_repeats_history(reply: ChatMessage, history: list[ChatMessage]) -> bool:
+    for message in reversed(history):
+        if message.role == "assistant":
+            return _normalize_text(reply.content) == _normalize_text(message.content)
+    return False
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
 
 
 def _scenario_context(scenario: Scenario, extra_instructions: str) -> str:

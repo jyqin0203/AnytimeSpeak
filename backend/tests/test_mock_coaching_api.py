@@ -87,6 +87,29 @@ def test_chat_endpoint_returns_scenario_aware_mock_reply():
     assert "quick_feedback" not in body
 
 
+def test_mock_chat_avoids_repeating_previous_assistant_reply():
+    repeated_reply = (
+        "Sure. Would you like that for here or to go, or would you like a drink "
+        "with that?"
+    )
+    response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "restaurant",
+            "latest_user_message": "A sandwich please.",
+            "conversation_history": [
+                {"role": "assistant", "content": repeated_reply},
+                {"role": "user", "content": "A sandwich please."},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reply"]["content"] != repeated_reply
+    assert "anything else" in body["reply"]["content"].lower()
+
+
 def test_feedback_endpoint_returns_correction_and_expression_tip():
     response = client.post(
         "/api/feedback",
@@ -111,6 +134,23 @@ def test_feedback_endpoint_returns_correction_and_expression_tip():
     assert set(body["score_breakdown"]) == {"grammar", "naturalness", "relevance", "clarity"}
     assert body["provider"] == "mock"
     assert 0 <= body["score"] <= 100
+
+
+def test_feedback_repairs_incomplete_drink_question_without_extra_connector():
+    response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "restaurant",
+            "latest_user_message": "and would you like a drink with",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommended_english"] == "Would you like a drink with that?"
+    assert body["more_natural_option"] == "Would you like a drink with that?"
+    assert "with 后面" in body["why"]
+    assert "recommendation" not in body["more_natural_option"].lower()
 
 
 def test_feedback_endpoint_improves_recently_question_mock_quality():

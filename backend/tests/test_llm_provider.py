@@ -233,6 +233,13 @@ def test_llm_timeout_allows_slow_provider_responses():
     assert llm_provider.LLM_TIMEOUT_SECONDS >= 90.0
 
 
+def test_chat_uses_shorter_provider_timeout():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.CHAT_TIMEOUT_SECONDS < llm_provider.LLM_TIMEOUT_SECONDS
+    assert llm_provider.CHAT_TIMEOUT_SECONDS <= 30.0
+
+
 def test_llm_provider_info_logs_are_enabled():
     import app.llm_provider as llm_provider
 
@@ -316,7 +323,11 @@ def test_chat_falls_back_when_llm_reply_is_missing(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    monkeypatch.setattr(llm_provider, "_request_chat_completion", lambda _messages: '{"reply": null}')
+    monkeypatch.setattr(
+        llm_provider,
+        "_request_chat_completion",
+        lambda _messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS: '{"reply": null}',
+    )
 
     response = llm_provider.create_chat_reply_with_fallback(
         ChatRequest(scenario_id="interview", latest_user_message="I feel nervous.")
@@ -325,6 +336,37 @@ def test_chat_falls_back_when_llm_reply_is_missing(monkeypatch: pytest.MonkeyPat
     assert response.provider == "mock"
     assert response.fallback_reason == "schema_validation_failed"
     assert response.reply.content != "None"
+
+
+def test_chat_falls_back_when_llm_repeats_previous_assistant_turn(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    repeated = "Welcome! Are you ready to order, or would you like a few recommendations first?"
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return f'{{"reply": {{"role": "assistant", "content": "{repeated}"}}}}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(
+            scenario_id="restaurant",
+            latest_user_message="A sandwich please.",
+            conversation_history=[
+                ChatMessage(role="assistant", content=repeated),
+                ChatMessage(role="user", content="A sandwich please."),
+            ],
+        )
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "schema_validation_failed"
+    assert response.reply.content != repeated
 
 
 def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
@@ -458,6 +500,18 @@ def test_llm_text_cleanup_removes_em_dash_repeated_punctuation_and_limits_length
     )
 
     assert "—" not in cleaned
+    assert " - " not in cleaned
     assert "!!!" not in cleaned
     assert "??" not in cleaned
     assert len(cleaned) <= 45
+
+
+def test_llm_text_cleanup_removes_separator_hyphens():
+    import app.llm_provider as llm_provider
+
+    cleaned = llm_provider._clean_llm_text(
+        "I'm nervous - this is my first interview - but I want to practice."
+    )
+
+    assert " - " not in cleaned
+    assert "nervous, this" in cleaned
