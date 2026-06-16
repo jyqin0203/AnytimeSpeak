@@ -1,0 +1,2244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AnytimeSpeak 路演幻灯片</title>
+    <style>
+        /* === THEME VARIABLES === */
+        :root {
+            --stage-bg: #E5E7EB;
+            --slide-bg: #F8FAFC;
+            --bg: #F8FAFC;
+            --surface: #FFFFFF;
+            --text: #1F2A44;
+            --muted: #64748B;
+            --primary: #6C5CE7;
+            --primary-dark: #2F2A75;
+            --primary-soft: #EEF2FF;
+            --accent: #7A6CF6;
+            --accent-soft: #FCE7F3;
+            --border: #E2E8F0;
+            --blue-soft: #EAF4FF;
+            --success-soft: #F8FAFC;
+            --warning-soft: #F8FAFC;
+            --shadow: 0 24px 70px rgba(31, 42, 68, 0.12);
+            --font-display: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+            --font-body: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+            --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+            --duration-normal: 0.55s;
+        }
+
+        /* === RESET === */
+        * {
+            box-sizing: border-box;
+        }
+
+        /* ===========================================
+           FIXED 16:9 STAGE: MANDATORY BASE STYLES
+           Include this ENTIRE file in every presentation.
+           Slides are authored at 1920x1080 and scaled as a whole.
+           =========================================== */
+
+        /* 1. Lock the browser viewport */
+        html,
+        body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background: var(--stage-bg, #000);
+        }
+
+        /* 2. Full-window deck viewport */
+        .deck-viewport {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            background: var(--stage-bg, #000);
+        }
+
+        /* 3. Fixed 16:9 design canvas.
+           JavaScript sets transform: translate(...) scale(...). */
+        .deck-stage {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            transform-origin: 0 0;
+            background: var(--slide-bg, #fff);
+        }
+
+        /* 4. Slides stack inside the fixed stage.
+           Content must be laid out at 1920x1080, not reflowed per device. */
+        .slide {
+            position: absolute;
+            inset: 0;
+            width: 1920px;
+            height: 1080px;
+            overflow: hidden;
+            display: block;
+            visibility: hidden;
+            opacity: 0;
+            pointer-events: none;
+            background: var(--slide-bg, #fff);
+        }
+
+        .slide.active,
+        .slide.visible {
+            visibility: visible;
+            opacity: 1;
+            pointer-events: auto;
+            z-index: 1;
+        }
+
+        /* 5. Keep media inside authored slide bounds */
+        img,
+        video,
+        canvas,
+        svg {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        /* 6. Presentation chrome stays outside the slide design system */
+        .deck-controls {
+            position: fixed;
+            left: 50%;
+            bottom: 22px;
+            transform: translateX(-50%);
+            z-index: 1000;
+        }
+
+        /* 7. Print one fixed-size slide per page */
+        @media print {
+            html,
+            body {
+                width: 1920px;
+                height: auto;
+                overflow: visible;
+                background: #fff;
+            }
+
+            .deck-viewport {
+                position: static;
+                overflow: visible;
+                background: #fff;
+            }
+
+            .deck-stage {
+                position: static;
+                width: auto;
+                height: auto;
+                transform: none !important;
+                background: none;
+            }
+
+            .slide {
+                position: relative;
+                display: block !important;
+                visibility: visible !important;
+                opacity: 1 !important;
+                pointer-events: auto !important;
+                width: 1920px;
+                height: 1080px;
+                break-after: page;
+                page-break-after: always;
+            }
+
+            .slide:last-child {
+                break-after: auto;
+                page-break-after: auto;
+            }
+
+            .deck-controls {
+                display: none !important;
+            }
+        }
+
+        /* 8. Reduced motion */
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                transition-duration: 0.2s !important;
+            }
+        }
+
+        /* === BASE SLIDE SYSTEM === */
+        body {
+            color: var(--text);
+            font-family: var(--font-body);
+        }
+
+        .slide {
+            padding: 78px 94px 86px;
+            background:
+                linear-gradient(135deg, rgba(248, 250, 252, 0.98), rgba(241, 245, 249, 0.98)),
+                radial-gradient(circle at 88% 8%, rgba(79, 70, 229, 0.10), transparent 28%),
+                radial-gradient(circle at 8% 92%, rgba(79, 70, 229, 0.06), transparent 30%);
+        }
+
+        .slide::before {
+            content: "";
+            position: absolute;
+            left: 94px;
+            right: 94px;
+            top: 48px;
+            height: 1px;
+            background: var(--border);
+        }
+
+        .slide-inner {
+            position: relative;
+            z-index: 2;
+            width: 100%;
+            height: 100%;
+        }
+
+        h1,
+        h2,
+        h3,
+        p {
+            margin: 0;
+        }
+
+        h1 {
+            font-family: var(--font-display);
+            font-size: 126px;
+            line-height: 0.96;
+            color: var(--text);
+            letter-spacing: 0;
+            font-weight: 900;
+        }
+
+        h2 {
+            max-width: 1260px;
+            font-size: 64px;
+            line-height: 1.12;
+            color: var(--text);
+            letter-spacing: 0;
+            font-weight: 900;
+        }
+
+        h3 {
+            font-size: 31px;
+            line-height: 1.2;
+            color: var(--text);
+            font-weight: 900;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            height: 42px;
+            padding: 0 18px;
+            border-radius: 999px;
+            background: var(--primary-soft);
+            color: var(--primary-dark);
+            border: 1px solid rgba(79, 70, 229, 0.16);
+            font-size: 21px;
+            font-weight: 800;
+        }
+
+        .title-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 48px;
+            margin-bottom: 34px;
+        }
+
+        .title-row h2 {
+            margin-top: 18px;
+        }
+
+        .section-number {
+            flex: 0 0 auto;
+            color: rgba(79, 70, 229, 0.20);
+            font-size: 58px;
+            line-height: 1;
+            font-weight: 900;
+        }
+
+        .lead {
+            max-width: 1220px;
+            font-size: 31px;
+            line-height: 1.45;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .small {
+            font-size: 22px;
+            line-height: 1.38;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        /* === ANIMATION PATTERNS === */
+        .reveal,
+        .reveal-left,
+        .reveal-scale {
+            opacity: 0;
+            transition:
+                opacity var(--duration-normal) var(--ease-out-expo),
+                transform var(--duration-normal) var(--ease-out-expo);
+        }
+
+        .reveal {
+            transform: translateY(24px);
+        }
+
+        .reveal-left {
+            transform: translateX(-28px);
+        }
+
+        .reveal-scale {
+            transform: scale(0.97);
+        }
+
+        .slide.visible .reveal,
+        .slide.visible .reveal-left,
+        .slide.visible .reveal-scale {
+            opacity: 1;
+            transform: translate(0, 0) scale(1);
+        }
+
+        .d1 { transition-delay: 0.07s; }
+        .d2 { transition-delay: 0.14s; }
+        .d3 { transition-delay: 0.21s; }
+        .d4 { transition-delay: 0.28s; }
+        .d5 { transition-delay: 0.35s; }
+
+        /* === REUSABLE COMPONENTS === */
+        .card {
+            padding: 28px;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: var(--surface);
+            box-shadow: 0 18px 45px rgba(31, 42, 68, 0.08);
+        }
+
+        .card.soft {
+            background: linear-gradient(180deg, #FFFFFF, #F8FAFC);
+        }
+
+        .card h3 {
+            margin-bottom: 12px;
+        }
+
+        .card p {
+            font-size: 24px;
+            line-height: 1.42;
+            color: var(--muted);
+            font-weight: 600;
+        }
+
+        .tag-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            height: 44px;
+            padding: 0 18px;
+            border-radius: 999px;
+            background: #fff;
+            border: 1px solid var(--border);
+            color: var(--primary-dark);
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        .tag.accent {
+            color: var(--primary-dark);
+            background: var(--accent-soft);
+            border-color: rgba(79, 70, 229, 0.20);
+        }
+
+        .screenshot {
+            display: block;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 24px;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            background: #fff;
+        }
+
+        .screenshot.contain {
+            object-fit: contain;
+            padding: 10px;
+            background: #fff;
+        }
+
+        .caption {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .bullets {
+            display: grid;
+            gap: 16px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .bullets li {
+            position: relative;
+            padding-left: 28px;
+            color: var(--text);
+            font-size: 28px;
+            line-height: 1.34;
+            font-weight: 700;
+        }
+
+        .bullets li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 14px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--primary);
+        }
+
+        .callout {
+            padding: 24px 30px;
+            border-radius: 24px;
+            border: 1px solid rgba(79, 70, 229, 0.18);
+            background: var(--primary-soft);
+            color: var(--primary-dark);
+            font-size: 28px;
+            line-height: 1.36;
+            font-weight: 900;
+        }
+
+        .accent-line {
+            width: 86px;
+            height: 7px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+        }
+
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 36px;
+        }
+
+        .three-col {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+        }
+
+        .four-col {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 22px;
+        }
+
+        /* === SLIDE 1 COVER === */
+        .cover {
+            background:
+                linear-gradient(135deg, #F7FAFC 0%, #EEF4FA 100%),
+                radial-gradient(circle at 88% 16%, rgba(79, 70, 229, 0.08), transparent 24%),
+                radial-gradient(circle at 12% 88%, rgba(79, 70, 229, 0.05), transparent 26%);
+        }
+
+        .cover-grid {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            text-align: center;
+        }
+
+        .cover-content {
+            position: relative;
+            width: 1320px;
+            padding: 74px 84px 66px;
+            border-top: 1px solid rgba(79, 70, 229, 0.22);
+            border-bottom: 1px solid rgba(31, 42, 68, 0.12);
+        }
+
+        .cover-content::before,
+        .cover-content::after {
+            content: "";
+            position: absolute;
+            width: 46px;
+            height: 46px;
+            border-color: rgba(79, 70, 229, 0.36);
+            border-style: solid;
+        }
+
+        .cover-content::before {
+            left: 0;
+            top: 0;
+            border-width: 2px 0 0 2px;
+        }
+
+        .cover-content::after {
+            right: 0;
+            bottom: 0;
+            border-width: 0 2px 2px 0;
+            border-color: rgba(79, 70, 229, 0.30);
+        }
+
+        .cover h1 {
+            margin: 0 0 34px;
+            color: var(--primary-dark);
+            font-size: 168px;
+            line-height: 0.9;
+        }
+
+        .cover-subtitle {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 72px;
+            margin-bottom: 34px;
+            padding: 0 34px;
+            border: 1px solid rgba(79, 70, 229, 0.18);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.58);
+            font-size: 50px;
+            line-height: 1.18;
+            color: var(--text);
+            font-weight: 900;
+        }
+
+        .cover-value {
+            max-width: none;
+            margin-bottom: 0;
+            font-size: 36px;
+            line-height: 1.36;
+            color: var(--muted);
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .cover-meta {
+            display: flex;
+            justify-content: center;
+            gap: 42px;
+            margin-top: 68px;
+            color: var(--text);
+            font-size: 25px;
+            line-height: 1.34;
+            font-weight: 700;
+        }
+
+        /* === SLIDE 2 BACKGROUND === */
+        .pain-slide .title-row {
+            margin-bottom: 24px;
+        }
+
+        .pain-slide .title-row h2 {
+            max-width: 1500px;
+            font-size: 56px;
+            line-height: 1.12;
+            white-space: nowrap;
+        }
+
+        .pain-layout {
+            display: grid;
+            gap: 42px;
+            padding-top: 8px;
+        }
+
+        .pain-intro {
+            max-width: 1380px;
+            font-size: 31px;
+            line-height: 1.45;
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .pain-cards {
+            display: grid;
+            gap: 18px;
+            max-width: 1320px;
+        }
+
+        .pain-card {
+            min-height: 106px;
+            display: grid;
+            grid-template-columns: 196px 1fr;
+            gap: 22px;
+            align-items: center;
+            padding: 24px 30px;
+            border: 1px solid rgba(79, 70, 229, 0.18);
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.62);
+        }
+
+        .pain-card h3 {
+            margin: 0;
+            color: var(--primary-dark);
+            font-size: 29px;
+            line-height: 1.2;
+            white-space: nowrap;
+        }
+
+        .pain-card p {
+            color: var(--text);
+            font-size: 27px;
+            line-height: 1.34;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .pain-card:nth-child(2) {
+            border-color: rgba(79, 70, 229, 0.18);
+        }
+
+        .pain-card:nth-child(2) h3 {
+            color: var(--primary-dark);
+        }
+
+        .pain-card:nth-child(3) {
+            border-color: rgba(79, 70, 229, 0.20);
+        }
+
+        .pain-card:nth-child(3) h3 {
+            color: var(--primary-dark);
+        }
+
+        .pain-closing {
+            max-width: 1260px;
+            padding-top: 28px;
+            border-top: 1px solid rgba(79, 70, 229, 0.18);
+            color: var(--primary-dark);
+            font-size: 34px;
+            line-height: 1.32;
+            font-weight: 900;
+        }
+
+        /* === SLIDE 3 PRODUCT LOOP === */
+        .loop-layout {
+            display: grid;
+            grid-template-columns: 1.08fr 0.92fr;
+            gap: 40px;
+            align-items: end;
+        }
+
+        .loop-flow {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 18px;
+            margin-top: 30px;
+        }
+
+        .loop-step {
+            min-height: 122px;
+            padding: 24px 18px;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: #fff;
+            color: var(--text);
+            font-size: 26px;
+            line-height: 1.22;
+            font-weight: 900;
+            box-shadow: 0 14px 34px rgba(31, 42, 68, 0.07);
+        }
+
+        .loop-step.primary {
+            color: #fff;
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .loop-shot {
+            height: 520px;
+        }
+
+        /* === SLIDE 4 FEATURES === */
+        .feature-layout {
+            display: grid;
+            grid-template-columns: 0.95fr 1.05fr;
+            gap: 34px;
+            align-items: stretch;
+        }
+
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+
+        .feature-card {
+            min-height: 164px;
+            padding: 23px;
+        }
+
+        .feature-card h3 {
+            font-size: 27px;
+        }
+
+        .feature-card p {
+            font-size: 21px;
+        }
+
+        .shot-mosaic {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 16px;
+            height: 646px;
+        }
+
+        .shot-mosaic .screenshot {
+            border-radius: 20px;
+        }
+
+        /* === SLIDE 5 SCENARIO === */
+        .scenario-layout {
+            display: grid;
+            grid-template-columns: 0.82fr 1.18fr;
+            gap: 42px;
+            align-items: stretch;
+        }
+
+        .scenario-shot-wrap {
+            position: relative;
+            height: 620px;
+        }
+
+        .annotation {
+            position: absolute;
+            padding: 11px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(79, 70, 229, 0.24);
+            background: rgba(255, 255, 255, 0.94);
+            color: var(--primary-dark);
+            font-size: 18px;
+            font-weight: 900;
+            box-shadow: 0 12px 28px rgba(31, 42, 68, 0.12);
+            white-space: nowrap;
+        }
+
+        .a1 { left: 34px; top: 70px; }
+        .a2 { right: 38px; top: 130px; }
+        .a3 { left: 48px; bottom: 170px; }
+        .a4 { right: 44px; bottom: 112px; }
+        .a5 { left: 230px; bottom: 42px; color: var(--primary-dark); border-color: rgba(79, 70, 229, 0.28); }
+
+        /* === SLIDE 6 ARCHITECTURE === */
+        .arch {
+            display: grid;
+            gap: 16px;
+            margin-top: 8px;
+        }
+
+        .arch-layer {
+            display: grid;
+            grid-template-columns: 280px 1fr 250px;
+            gap: 22px;
+            align-items: center;
+            padding: 20px 24px;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: #fff;
+            box-shadow: 0 12px 30px rgba(31, 42, 68, 0.06);
+        }
+
+        .arch-name {
+            color: var(--primary-dark);
+            font-size: 29px;
+            line-height: 1.2;
+            font-weight: 900;
+        }
+
+        .arch-desc {
+            color: var(--text);
+            font-size: 24px;
+            line-height: 1.36;
+            font-weight: 700;
+        }
+
+        .arch-note {
+            padding: 13px 16px;
+            border-radius: 16px;
+            background: var(--primary-soft);
+            color: var(--primary-dark);
+            font-size: 20px;
+            line-height: 1.28;
+            font-weight: 800;
+            text-align: center;
+        }
+
+        .arch-arrow {
+            margin-left: 134px;
+            color: var(--primary);
+            font-size: 24px;
+            font-weight: 900;
+        }
+
+        /* === SLIDE 7 SESSION FLOW === */
+        .session-layout {
+            display: grid;
+            grid-template-columns: 0.74fr 0.86fr 0.95fr;
+            gap: 28px;
+            align-items: stretch;
+        }
+
+        .compact-list {
+            display: grid;
+            gap: 12px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .compact-list li {
+            padding: 15px 17px;
+            border-radius: 17px;
+            background: #F8FAFC;
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 22px;
+            line-height: 1.3;
+            font-weight: 700;
+        }
+
+        .flow-list {
+            counter-reset: flow;
+            display: grid;
+            gap: 11px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .flow-list li {
+            counter-increment: flow;
+            display: grid;
+            grid-template-columns: 42px 1fr;
+            gap: 12px;
+            align-items: center;
+            padding: 13px 15px;
+            border-radius: 17px;
+            background: var(--primary-soft);
+            color: var(--text);
+            font-size: 21px;
+            line-height: 1.24;
+            font-weight: 800;
+        }
+
+        .flow-list li::before {
+            content: counter(flow);
+            display: grid;
+            place-items: center;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: var(--primary);
+            color: #fff;
+            font-size: 18px;
+            font-weight: 900;
+        }
+
+        .session-shot {
+            height: 500px;
+        }
+
+        /* === SLIDE 8 FALLBACK === */
+        .risk-layout {
+            display: grid;
+            grid-template-columns: 1.1fr 0.9fr;
+            gap: 34px;
+            align-items: stretch;
+        }
+
+        .mapping-table {
+            display: grid;
+            grid-template-columns: 1fr 1fr 0.9fr;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: #fff;
+            box-shadow: 0 18px 44px rgba(31, 42, 68, 0.08);
+        }
+
+        .mapping-table div {
+            min-height: 75px;
+            padding: 17px 18px;
+            border-right: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            font-size: 20px;
+            line-height: 1.28;
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .mapping-table div:nth-child(3n) {
+            border-right: 0;
+        }
+
+        .mapping-table .head {
+            min-height: 58px;
+            background: var(--primary-soft);
+            color: var(--primary-dark);
+            font-size: 22px;
+            font-weight: 900;
+        }
+
+        .provider-shot {
+            height: 216px;
+            margin-bottom: 24px;
+        }
+
+        /* === SLIDE 9 DEMO === */
+        .demo-layout {
+            display: grid;
+            grid-template-columns: 1.03fr 0.97fr;
+            gap: 38px;
+            align-items: stretch;
+        }
+
+        .demo-shot {
+            height: 615px;
+        }
+
+        .demo-list {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 13px;
+        }
+
+        .demo-list span,
+        .fallback-list span {
+            display: block;
+            padding: 16px 18px;
+            border-radius: 18px;
+            background: #F8FAFC;
+            border: 1px solid var(--border);
+            color: var(--text);
+            font-size: 21px;
+            line-height: 1.25;
+            font-weight: 800;
+        }
+
+        .fallback-list {
+            display: grid;
+            gap: 13px;
+            margin-top: 18px;
+        }
+
+        /* === SLIDE 10 QUALITY === */
+        .quality-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 24px;
+            margin-bottom: 36px;
+        }
+
+        .quality-card {
+            min-height: 220px;
+        }
+
+        .quality-card p {
+            font-size: 23px;
+        }
+
+        .timeline {
+            display: grid;
+            grid-template-columns: repeat(9, 1fr);
+            gap: 10px;
+            align-items: stretch;
+        }
+
+        .milestone {
+            min-height: 132px;
+            padding: 18px 12px;
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            background: #fff;
+            color: var(--text);
+            font-size: 18px;
+            line-height: 1.22;
+            font-weight: 900;
+            text-align: center;
+            box-shadow: 0 10px 24px rgba(31, 42, 68, 0.06);
+        }
+
+        .milestone b {
+            display: block;
+            margin-bottom: 10px;
+            color: var(--primary);
+            font-size: 22px;
+        }
+
+        /* === SLIDE 11 COMPARISON === */
+        .compare-layout {
+            display: grid;
+            grid-template-columns: 1.08fr 0.92fr;
+            gap: 34px;
+            align-items: end;
+        }
+
+        .compare-table {
+            display: grid;
+            grid-template-columns: 1.05fr 0.9fr 1.06fr 1.22fr;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: #fff;
+            box-shadow: 0 18px 44px rgba(31, 42, 68, 0.08);
+        }
+
+        .compare-table div {
+            min-height: 86px;
+            padding: 18px 18px;
+            border-right: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 20px;
+            line-height: 1.27;
+            font-weight: 700;
+        }
+
+        .compare-table div:nth-child(4n) {
+            border-right: 0;
+        }
+
+        .compare-table .head {
+            min-height: 58px;
+            color: var(--primary-dark);
+            background: var(--primary-soft);
+            font-size: 22px;
+            font-weight: 900;
+        }
+
+        .compare-table .name {
+            color: var(--text);
+            font-weight: 900;
+        }
+
+        .side-shot {
+            height: 430px;
+            margin-bottom: 22px;
+        }
+
+        /* === SLIDE 12 CHALLENGE === */
+        .challenge-table {
+            display: grid;
+            grid-template-columns: 0.95fr 1.25fr;
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 24px;
+            background: #fff;
+            box-shadow: 0 18px 44px rgba(31, 42, 68, 0.08);
+        }
+
+        .challenge-table div {
+            min-height: 74px;
+            padding: 17px 22px;
+            border-right: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+            color: var(--muted);
+            font-size: 22px;
+            line-height: 1.28;
+            font-weight: 700;
+        }
+
+        .challenge-table div:nth-child(2n) {
+            border-right: 0;
+        }
+
+        .challenge-table .head {
+            min-height: 58px;
+            background: var(--primary-soft);
+            color: var(--primary-dark);
+            font-size: 24px;
+            font-weight: 900;
+        }
+
+        .future-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 22px;
+        }
+
+        /* === SLIDE 13 THANKS === */
+        .thanks {
+            padding: 0;
+            background: #1F2A44;
+        }
+
+        .thanks .slide-inner {
+            padding: 88px 104px;
+            display: grid;
+            grid-template-columns: 0.88fr 1.12fr;
+            gap: 70px;
+            align-items: center;
+        }
+
+        .thanks::before {
+            display: none;
+        }
+
+        .thanks h2 {
+            color: #fff;
+            font-size: 88px;
+        }
+
+        .thanks .lead {
+            color: #CBD5E1;
+            font-size: 36px;
+        }
+
+        .thanks .cover-meta {
+            color: #E2E8F0;
+        }
+
+        .thanks-shot {
+            position: relative;
+            height: 690px;
+            opacity: 0.78;
+        }
+
+        .thanks-shot::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: 28px;
+            background: linear-gradient(135deg, rgba(15, 23, 42, 0.14), rgba(79, 70, 229, 0.24));
+            pointer-events: none;
+        }
+
+        /* === UNIFIED ROADSHOW LAYOUT === */
+        .slide {
+            padding: 64px 98px 112px;
+            background:
+                linear-gradient(135deg, #F8FAFC 0%, #EEF4FA 100%),
+                radial-gradient(circle at 90% 12%, rgba(108, 92, 231, 0.06), transparent 25%);
+        }
+
+        .slide::before {
+            left: 98px;
+            right: 98px;
+            top: 42px;
+            background: rgba(79, 70, 229, 0.16);
+        }
+
+        .slide-inner {
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            gap: 24px;
+            width: min(100%, 1360px);
+            margin: 0 auto;
+        }
+
+        .title-row {
+            margin: 0;
+            align-items: start;
+            gap: 32px;
+        }
+
+        .title-row h2 {
+            max-width: 1280px;
+            margin-top: 18px;
+            font-size: 52px;
+            line-height: 1.1;
+            text-wrap: balance;
+        }
+
+        .eyebrow {
+            background: rgba(238, 242, 255, 0.90);
+            border-color: rgba(79, 70, 229, 0.18);
+            color: var(--primary-dark);
+        }
+
+        .section-number {
+            color: rgba(55, 48, 163, 0.16);
+        }
+
+        .content-grid {
+            display: grid;
+            gap: 22px;
+            align-items: center;
+        }
+
+        .grid-2 {
+            grid-template-columns: 0.58fr 0.42fr;
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .grid-4 {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
+        .point-row {
+            display: grid;
+            gap: 14px;
+        }
+
+        .point {
+            min-height: 88px;
+            display: grid;
+            grid-template-columns: 190px 1fr;
+            gap: 22px;
+            align-items: center;
+            padding: 18px 24px;
+            border-radius: 16px;
+            border: 1px solid rgba(79, 70, 229, 0.16);
+            background: rgba(255, 255, 255, 0.74);
+        }
+
+        .point h3 {
+            margin: 0;
+            color: var(--primary-dark);
+            font-size: 28px;
+            white-space: nowrap;
+        }
+
+        .point p {
+            color: var(--text);
+            font-size: 25px;
+            line-height: 1.34;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .plain-card {
+            padding: 24px 26px;
+            border-radius: 16px;
+            border: 1px solid rgba(79, 70, 229, 0.16);
+            background: rgba(255, 255, 255, 0.72);
+        }
+
+        .plain-card h3 {
+            margin-bottom: 12px;
+            color: var(--primary-dark);
+            font-size: 29px;
+        }
+
+        .plain-card p,
+        .plain-card li {
+            color: var(--text);
+            font-size: 24px;
+            line-height: 1.36;
+            font-weight: 700;
+        }
+
+        .plain-card ul {
+            display: grid;
+            gap: 12px;
+            margin: 0;
+            padding: 0;
+            list-style: none;
+        }
+
+        .plain-card li {
+            padding-left: 24px;
+            position: relative;
+        }
+
+        .plain-card li::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 13px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+        }
+
+        .key-line {
+            padding-top: 18px;
+            border-top: 1px solid rgba(79, 70, 229, 0.18);
+            color: var(--primary-dark);
+            font-size: 28px;
+            line-height: 1.3;
+            font-weight: 900;
+        }
+
+        .large-copy {
+            color: var(--muted);
+            font-size: 28px;
+            line-height: 1.38;
+            font-weight: 700;
+        }
+
+        .screenshot {
+            border-radius: 18px;
+            border: 1px solid rgba(79, 70, 229, 0.16);
+            box-shadow: 0 16px 38px rgba(31, 42, 68, 0.10);
+            object-fit: contain;
+            background: #FFFFFF;
+        }
+
+        .shot-large {
+            height: 500px;
+        }
+
+        .shot-medium {
+            height: 430px;
+        }
+
+        .shot-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 18px;
+        }
+
+        .shot-grid .shot {
+            height: 292px;
+        }
+
+        .flow-strip {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 16px;
+        }
+
+        .flow-strip span {
+            position: relative;
+            min-height: 68px;
+            display: grid;
+            place-items: center;
+            padding: 10px 12px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.74);
+            border: 1px solid rgba(79, 70, 229, 0.18);
+            color: var(--text);
+            font-size: 20px;
+            line-height: 1.24;
+            font-weight: 900;
+            text-align: center;
+        }
+
+        .flow-strip span:not(:last-child)::after {
+            content: "→";
+            position: absolute;
+            right: -13px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(47, 42, 117, 0.45);
+            font-size: 18px;
+            font-weight: 900;
+        }
+
+        .flow-strip span:last-child {
+            color: #FFFFFF;
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .slide-02 .title-row h2,
+        .slide-03 .title-row h2 {
+            max-width: 1320px;
+            font-size: 50px;
+            white-space: nowrap;
+            text-wrap: nowrap;
+        }
+
+        .slide-02 .content-grid {
+            align-self: start;
+            gap: 20px;
+            padding-top: 4px;
+        }
+
+        .slide-02 .large-copy {
+            max-width: 1260px;
+        }
+
+        .slide-02 .point-row {
+            max-width: 1240px;
+        }
+
+        .inline-summary {
+            margin-top: 4px;
+            padding: 18px 22px;
+            border: 1px solid rgba(79, 70, 229, 0.16);
+            border-radius: 16px;
+            background: rgba(238, 242, 255, 0.76);
+            font-size: 26px;
+            white-space: nowrap;
+        }
+
+        .slide-03 .content-grid {
+            align-items: start;
+            gap: 34px;
+            padding-top: 4px;
+        }
+
+        .slide-03 .large-copy {
+            max-width: 760px;
+            margin-bottom: 26px;
+        }
+
+        .slide-03 .flow-strip {
+            max-width: 770px;
+        }
+
+        .slide-03 .inline-summary {
+            max-width: 770px;
+            margin-top: 24px;
+        }
+
+        .screenshot-frame {
+            padding: 14px;
+            border: 1px solid rgba(79, 70, 229, 0.14);
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.74);
+            box-shadow: 0 14px 32px rgba(31, 42, 68, 0.08);
+        }
+
+        .screenshot-frame .screenshot {
+            box-shadow: none;
+        }
+
+        .slide-03 .shot-large {
+            height: 440px;
+        }
+
+        .slide-03 .caption {
+            color: var(--muted);
+            font-size: 19px;
+            line-height: 1.3;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .arch-simple {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 18px;
+            align-items: stretch;
+        }
+
+        .arch-simple .plain-card {
+            min-height: 240px;
+        }
+
+        .table-clean {
+            display: grid;
+            overflow: hidden;
+            border-radius: 16px;
+            border: 1px solid rgba(79, 70, 229, 0.16);
+            background: rgba(255, 255, 255, 0.64);
+        }
+
+        .table-3 {
+            grid-template-columns: 0.85fr 1.1fr 1fr;
+        }
+
+        .table-4 {
+            grid-template-columns: 0.9fr 0.85fr 1.1fr 1.1fr;
+        }
+
+        .table-2 {
+            grid-template-columns: 0.85fr 1.25fr;
+        }
+
+        .table-clean div {
+            min-height: 70px;
+            padding: 17px 20px;
+            border-right: 1px solid rgba(79, 70, 229, 0.12);
+            border-bottom: 1px solid rgba(79, 70, 229, 0.12);
+            color: var(--text);
+            font-size: 22px;
+            line-height: 1.28;
+            font-weight: 700;
+        }
+
+        .table-clean .head {
+            color: var(--primary-dark);
+            background: rgba(238, 242, 255, 0.85);
+            font-weight: 900;
+        }
+
+        .table-2 div:nth-child(2n),
+        .table-3 div:nth-child(3n),
+        .table-4 div:nth-child(4n) {
+            border-right: 0;
+        }
+
+        .comparison-table div {
+            display: grid;
+            place-items: center;
+            text-align: center;
+        }
+
+        .comparison-table div:nth-child(4n) {
+            background: rgba(238, 242, 255, 0.62);
+            color: var(--primary-dark);
+            font-weight: 900;
+        }
+
+        .comparison-table .head:nth-child(4) {
+            background: rgba(79, 70, 229, 0.12);
+        }
+
+        .demo-center {
+            display: grid;
+            place-items: center;
+            min-height: 560px;
+            text-align: center;
+        }
+
+        .demo-center h2 {
+            max-width: 1180px;
+            font-size: 72px;
+            color: var(--primary-dark);
+        }
+
+        .demo-center p {
+            margin-top: 28px;
+            color: var(--muted);
+            font-size: 32px;
+            font-weight: 700;
+        }
+
+        .cover .slide-inner,
+        .thanks .slide-inner {
+            display: grid;
+            place-items: center;
+            text-align: center;
+        }
+
+        .cover,
+        .thanks {
+            padding: 0;
+        }
+
+        .cover::before,
+        .thanks::before {
+            display: none;
+        }
+
+        .cover .slide-inner,
+        .thanks .slide-inner {
+            width: 100%;
+            height: 100%;
+            padding: 0;
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr;
+            gap: 0;
+        }
+
+        .cover-content {
+            border-color: rgba(79, 70, 229, 0.20);
+            transform: translateY(24px);
+        }
+
+        .cover-content::after {
+            border-color: rgba(79, 70, 229, 0.26);
+        }
+
+        .thanks {
+            background:
+                linear-gradient(135deg, #F8FAFC 0%, #EEF4FA 100%),
+                radial-gradient(circle at 80% 18%, rgba(79, 70, 229, 0.08), transparent 28%);
+        }
+
+        .thanks h2,
+        .thanks .lead,
+        .thanks .cover-meta {
+            color: var(--text);
+        }
+
+        /* === PRESENTATION CHROME === */
+        .deck-controls {
+            display: flex;
+            align-items: center;
+            bottom: 6px;
+            gap: 8px;
+            padding: 5px 8px;
+            border-radius: 999px;
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid var(--border);
+            box-shadow: 0 5px 14px rgba(31, 42, 68, 0.08);
+            font: 800 11px var(--font-body);
+            user-select: none;
+        }
+
+        .deck-controls button {
+            width: 22px;
+            height: 22px;
+            border: 0;
+            border-radius: 50%;
+            color: #fff;
+            background: var(--primary);
+            font: 900 12px var(--font-body);
+            cursor: pointer;
+        }
+
+        .progress-track {
+            width: 56px;
+            height: 4px;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #E2E8F0;
+        }
+
+        .progress-fill {
+            width: 0;
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            transition: width 0.25s ease;
+        }
+
+        .slide-nav {
+            position: fixed;
+            right: 18px;
+            top: 50%;
+            z-index: 1000;
+            display: grid;
+            gap: 10px;
+            transform: translateY(-50%);
+            padding: 4px;
+        }
+
+        .slide-nav button {
+            width: 10px;
+            height: 10px;
+            padding: 0;
+            border: 0;
+            border-radius: 50%;
+            background: rgba(79, 70, 229, 0.24);
+            color: transparent;
+            font-size: 0;
+            cursor: pointer;
+            transition: transform 0.18s ease, background 0.18s ease, opacity 0.18s ease;
+        }
+
+        .slide-nav button:hover,
+        .slide-nav button.active {
+            background: var(--primary);
+            transform: scale(1.45);
+        }
+
+        /* === INLINE EDITING === */
+        .edit-hotzone {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 80px;
+            height: 80px;
+            z-index: 10000;
+            cursor: pointer;
+        }
+
+        .edit-toggle {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            z-index: 10001;
+            width: 42px;
+            height: 42px;
+            border: 1px solid var(--border);
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.94);
+            color: var(--primary-dark);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            cursor: pointer;
+        }
+
+        .edit-toggle.show,
+        .edit-toggle.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        body.editing [data-editable] {
+            outline: 2px dashed rgba(79, 70, 229, 0.45);
+            outline-offset: 5px;
+            cursor: text;
+        }
+
+        /* === CURSOR ACCENT === */
+        .cursor-orb,
+        .cursor-dot {
+            position: fixed;
+            left: 0;
+            top: 0;
+            z-index: 999;
+            pointer-events: none;
+            opacity: 0;
+            transform: translate3d(-50%, -50%, 0);
+            transition: opacity 0.2s ease, width 0.2s ease, height 0.2s ease, background 0.2s ease;
+        }
+
+        .cursor-orb {
+            width: 46px;
+            height: 46px;
+            border: 1px solid rgba(108, 92, 231, 0.34);
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(108, 92, 231, 0.12), rgba(108, 92, 231, 0.05) 52%, transparent 72%);
+            box-shadow: 0 0 22px rgba(108, 92, 231, 0.12);
+        }
+
+        .cursor-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--primary);
+            box-shadow: 0 0 12px rgba(108, 92, 231, 0.32);
+        }
+
+        body.cursor-ready .cursor-orb,
+        body.cursor-ready .cursor-dot {
+            opacity: 1;
+        }
+
+        body.cursor-active .cursor-orb {
+            width: 64px;
+            height: 64px;
+            background: radial-gradient(circle, rgba(108, 92, 231, 0.15), rgba(108, 92, 231, 0.07) 52%, transparent 74%);
+        }
+
+        @media (pointer: coarse), (prefers-reduced-motion: reduce) {
+            .cursor-orb,
+            .cursor-dot {
+                display: none;
+            }
+        }
+
+    </style>
+</head>
+<body>
+    <div class="cursor-orb" aria-hidden="true"></div>
+    <div class="cursor-dot" aria-hidden="true"></div>
+    <div class="deck-viewport" aria-label="AnytimeSpeak roadshow presentation">
+        <main class="deck-stage" id="deckStage">
+            <section class="slide cover active">
+                <div class="slide-inner">
+                    <div class="cover-content">
+                        <h1 class="reveal d1" data-editable>AnytimeSpeak</h1>
+                        <p class="cover-subtitle reveal d2" data-editable>AI 英语口语陪练系统</p>
+                        <p class="cover-value reveal d3" data-editable>让英语学习者在真实场景中敢开口、能纠错、可复盘。</p>
+                        <div class="cover-meta reveal d4">
+                            <span data-editable>汇报人：覃迦迎</span>
+                            <span data-editable>联系方式：24213020053@m.fudan.edu.cn</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="slide slide-02">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">项目背景 / 痛点</div>
+                            <h2 class="reveal d1" data-editable>很多学习者不是不会英语，而是缺少稳定开口的环境。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">02</div>
+                    </div>
+                    <div class="content-grid">
+                        <p class="large-copy reveal d2" data-editable>口语学习的难点，不只是“说对”，更是能在低压力环境里反复开口，并获得及时反馈。</p>
+                        <div class="point-row">
+                            <div class="point reveal d1"><h3 data-editable>不敢开口</h3><p data-editable>缺少低压力、可反复练习的口语环境</p></div>
+                            <div class="point reveal d2"><h3 data-editable>缺少反馈</h3><p data-editable>说完后不知道哪里不自然、该怎么改</p></div>
+                            <div class="point reveal d3"><h3 data-editable>难以复盘</h3><p data-editable>练习结束后没有沉淀，看不到持续进步</p></div>
+                        </div>
+                        <p class="key-line inline-summary reveal d4" data-editable>AnytimeSpeak 希望把一次开口，变成一次有反馈、可复盘的口语练习。</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="slide slide-03">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">产品闭环</div>
+                            <h2 class="reveal d1" data-editable>把一次对话，组织成完整的口语练习链路。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">03</div>
+                    </div>
+                    <div class="content-grid grid-2">
+                        <div>
+                            <p class="large-copy reveal d2" data-editable>用户从场景进入练习，通过多轮对话获得即时反馈、发音测评、课后总结与历史复盘。</p>
+                            <div class="flow-strip reveal d3">
+                                <span>场景选择</span><span>输入</span><span>AI 对话</span><span>即时反馈</span><span>发音测评</span><span>总结</span><span>历史复盘</span>
+                            </div>
+                            <p class="key-line inline-summary reveal d4" data-editable>核心不是“聊几句”，而是让每次练习都留下可改进的依据。</p>
+                        </div>
+                        <div class="reveal-scale d2">
+                            <div class="screenshot-frame">
+                                <div class="shot-large"><img class="screenshot" src="assets/06-practice-chat.png" alt="练习页截图"></div>
+                            </div>
+                            <p class="caption">真实练习页：对话、输入和反馈集中在同一学习工作台。</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">核心功能</div>
+                            <h2 class="reveal d1" data-editable>核心功能已经形成可演示的产品路径。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">04</div>
+                    </div>
+                    <div class="content-grid grid-2">
+                        <div class="content-grid grid-3">
+                            <div class="plain-card reveal d1"><h3>场景化练习</h3><p>面试、点餐、会议、旅行、日常交流。</p></div>
+                            <div class="plain-card reveal d2"><h3>语音 / 文本输入</h3><p>麦克风输入可用，文本输入作为稳定 fallback。</p></div>
+                            <div class="plain-card reveal d2"><h3>AI 多轮对话</h3><p>围绕角色、场景和目标持续追问。</p></div>
+                            <div class="plain-card reveal d3"><h3>即时反馈</h3><p>给出表达建议、原因说明和可替代表达。</p></div>
+                            <div class="plain-card reveal d3"><h3>发音测评</h3><p>展示总分、流利度、准确度、完整度。</p></div>
+                            <div class="plain-card reveal d4"><h3>总结复盘</h3><p>沉淀表现、问题和下一步建议。</p></div>
+                        </div>
+                        <div class="shot-grid reveal-scale d2">
+                            <div class="shot"><img class="screenshot" src="assets/03-scenario-selection.png" alt="场景选择截图"></div>
+                            <div class="shot"><img class="screenshot" src="assets/07-feedback-panel.png" alt="反馈面板截图"></div>
+                            <div class="shot"><img class="screenshot" src="assets/09-summary.png" alt="总结截图"></div>
+                            <div class="shot"><img class="screenshot" src="assets/10-history-list.png" alt="历史记录截图"></div>
+                        </div>
+                    </div>
+                    <p class="key-line reveal d5" data-editable>截图展示的是已实现功能，而不是方案示意。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">场景设计</div>
+                            <h2 class="reveal d1" data-editable>不是自由聊天，而是有目标、有角色、有反馈重点的练习。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">05</div>
+                    </div>
+                    <div class="content-grid grid-2">
+                        <div class="plain-card reveal d2">
+                            <h3 data-editable>为什么要先选场景</h3>
+                            <ul>
+                                <li data-editable>限制话题范围，避免练习发散。</li>
+                                <li data-editable>明确 AI 与用户角色，降低开口压力。</li>
+                                <li data-editable>提前设定反馈重点，便于总结复盘。</li>
+                            </ul>
+                        </div>
+                        <div class="shot-large reveal-scale d2"><img class="screenshot" src="assets/04-daily-scenario-card.png" alt="日常交流场景卡片截图"></div>
+                    </div>
+                    <p class="key-line reveal d4" data-editable>场景化让 AI 陪练从“随便聊”变成“围绕目标练”。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">系统架构</div>
+                            <h2 class="reveal d1" data-editable>前端、后端、AI / 语音能力和数据存储分层协作。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">06</div>
+                    </div>
+                    <div class="arch-simple reveal d2">
+                        <div class="plain-card"><h3>前端</h3><p>React + Vite + TypeScript，承载场景选择、练习页、反馈、总结和历史记录。</p></div>
+                        <div class="plain-card"><h3>后端</h3><p>FastAPI 编排 session、chat、feedback、summary、pronunciation、history。</p></div>
+                        <div class="plain-card"><h3>AI / 语音能力</h3><p>LLM、ASR、发音测评 provider，并保留 mock fallback。</p></div>
+                        <div class="plain-card"><h3>SQLite</h3><p>保存 sessions、messages、feedback、summary 和 practice history。</p></div>
+                    </div>
+                    <p class="key-line reveal d4" data-editable>架构目标是先保证完整链路稳定可演示，再逐步替换更强的 provider 和存储方案。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">Session-based Flow</div>
+                            <h2 class="reveal d1" data-editable>让 AI 记住这次练习，而不是每轮重新开始。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">07</div>
+                    </div>
+                    <div class="content-grid grid-2">
+                        <div class="content-grid">
+                            <div class="plain-card reveal d2"><h3>没有 session</h3><p>每轮对话割裂，场景、角色、目标和历史表现都难以沉淀。</p></div>
+                            <div class="plain-card reveal d3"><h3>使用 session</h3><p>绑定 scenario、story seed、messages、feedback 和 summary，练习过程可追踪。</p></div>
+                        </div>
+                        <div class="shot-medium reveal-scale d2"><img class="screenshot" src="assets/06-practice-chat.png" alt="多轮练习对话截图"></div>
+                    </div>
+                    <p class="key-line reveal d4" data-editable>Session 是反馈、总结和历史复盘能够成立的基础。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">Provider + Fallback</div>
+                            <h2 class="reveal d1" data-editable>真实 AI 应用需要预设失败路径。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">08</div>
+                    </div>
+                    <div class="content-grid grid-2">
+                        <div class="table-clean table-3 reveal d2">
+                            <div class="head">风险</div><div class="head">处理方式</div><div class="head">价值</div>
+                            <div>LLM 超时或解析失败</div><div>mock fallback 与解析兜底</div><div>页面不中断</div>
+                            <div>API key 未配置</div><div>环境变量配置与 fallback</div><div>演示可复现</div>
+                            <div>语音服务波动</div><div>文本输入 fallback</div><div>现场更可控</div>
+                            <div>反馈生成较慢</div><div>对话优先，反馈后补</div><div>交互不断流</div>
+                        </div>
+                        <div class="shot-medium reveal-scale d2"><img class="screenshot" src="assets/12-provider-status.png" alt="Provider 状态截图"></div>
+                    </div>
+                    <p class="key-line reveal d4" data-editable>Provider 状态用于说明来源与兜底，不暴露密钥或敏感错误。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">现场 Demo</div>
+                            <h2 class="reveal d1" data-editable>接下来切换到本地运行的 AnytimeSpeak。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">09</div>
+                    </div>
+                    <div class="demo-center reveal d2">
+                        <div>
+                            <h2 data-editable>展示完整口语学习闭环</h2>
+                            <p data-editable>场景选择 → 对话练习 → 即时反馈 → 发音测评 → 总结 → 历史复盘</p>
+                        </div>
+                    </div>
+                    <p class="key-line reveal d4" data-editable>这一页只作为浏览器演示的过渡。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">开发过程</div>
+                            <h2 class="reveal d1" data-editable>用小 PR 推进，让 main 分支持续保持可运行。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">10</div>
+                    </div>
+                    <div class="content-grid grid-4">
+                        <div class="plain-card reveal d1"><h3>小 PR</h3><p>按文档、脚手架、mock、provider、session、反馈、总结、历史记录分阶段推进。</p></div>
+                        <div class="plain-card reveal d2"><h3>持续交付</h3><p>每个阶段都保持核心 demo 路径可运行。</p></div>
+                        <div class="plain-card reveal d3"><h3>Mock 模式</h3><p>没有 API key 时也能完成稳定演示。</p></div>
+                        <div class="plain-card reveal d4"><h3>测试验证</h3><p>后端 pytest、前端 build 和关键接口手动验证。</p></div>
+                    </div>
+                    <p class="key-line reveal d5" data-editable>开发重点是稳定 MVP 路径，而不是一次性堆满功能。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">方案对比</div>
+                            <h2 class="reveal d1" data-editable>AnytimeSpeak 的价值在于把口语练习闭环跑通。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">11</div>
+                    </div>
+                    <div class="table-clean table-4 comparison-table reveal d2">
+                        <div class="head">方案</div><div class="head">优点</div><div class="head">不足</div><div class="head">AnytimeSpeak</div>
+                        <div>普通 AI 聊天</div><div>灵活</div><div>不聚焦训练目标</div><div>场景化练习 + 结构化反馈</div>
+                        <div>刷题 / 背词 App</div><div>稳定</div><div>缺少真实开口互动</div><div>多轮口语对话</div>
+                        <div>真人外教</div><div>真实</div><div>成本高，不随时可用</div><div>低门槛随时练习</div>
+                        <div>发音评分工具</div><div>发音量化</div><div>缺少语境和表达反馈</div><div>发音 + 表达 + 复盘</div>
+                    </div>
+                    <p class="key-line reveal d4" data-editable>不是单个模型能力，而是场景、反馈、发音测评和复盘的组合。</p>
+                </div>
+            </section>
+
+            <section class="slide">
+                <div class="slide-inner">
+                    <div class="title-row">
+                        <div>
+                            <div class="eyebrow reveal-left">上线挑战</div>
+                            <h2 class="reveal d1" data-editable>上线后的重点，是稳定性、成本和数据安全。</h2>
+                        </div>
+                        <div class="section-number reveal-scale">12</div>
+                    </div>
+                    <div class="table-clean table-2 reveal d2">
+                        <div class="head">上线问题</div><div class="head">后续方案</div>
+                        <div>LLM / 语音链路延迟</div><div>streaming、异步任务、超时控制</div>
+                        <div>provider 不稳定</div><div>重试、fallback、错误分类、监控</div>
+                        <div>SQLite 不适合多人长期使用</div><div>替换为 PostgreSQL / MySQL 或云数据库</div>
+                        <div>token 和语音调用成本</div><div>限制音频时长、token 和调用频率</div>
+                        <div>用户语音和学习数据隐私</div><div>鉴权、最小化存储、数据脱敏</div>
+                    </div>
+                    <p class="key-line reveal d4" data-editable>AI 应用的难点不只是接入模型，而是让模型能力稳定进入产品闭环。</p>
+                </div>
+            </section>
+
+            <section class="slide thanks">
+                <div class="slide-inner">
+                    <div class="cover-content">
+                        <h2 class="reveal d1" data-editable>Q&A</h2>
+                        <p class="lead reveal d2" data-editable style="margin-top: 28px;">AnytimeSpeak · AI 英语口语陪练系统</p>
+                        <div class="cover-meta reveal d3">
+                            <span data-editable>汇报人：覃迦迎</span>
+                            <span data-editable>联系方式：24213020053@m.fudan.edu.cn</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <nav class="deck-controls" aria-label="Presentation controls">
+        <button id="prevBtn" type="button" aria-label="Previous slide">‹</button>
+        <span id="pageText">1 / 13</span>
+        <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+        <button id="nextBtn" type="button" aria-label="Next slide">›</button>
+    </nav>
+    <nav class="slide-nav" id="slideNav" aria-label="Slide navigation"></nav>
+    <div class="edit-hotzone" title="编辑模式"></div>
+    <button class="edit-toggle" id="editToggle" title="Edit mode (E)" type="button">✎</button>
+
+    <script>
+        /* === SLIDE PRESENTATION CONTROLLER === */
+        class SlidePresentation {
+            constructor() {
+                this.slides = Array.from(document.querySelectorAll(".slide"));
+                this.currentSlide = 0;
+                this.stage = document.getElementById("deckStage");
+                this.pageText = document.getElementById("pageText");
+                this.progressFill = document.getElementById("progressFill");
+                this.slideNav = document.getElementById("slideNav");
+                this.wheelLocked = false;
+                this.setupStageScale();
+                this.setupKeyboardNav();
+                this.setupButtonNav();
+                this.setupSlideNav();
+                this.setupTouchNav();
+                this.setupWheelNav();
+                this.showSlide(0);
+            }
+
+            setupStageScale() {
+                const scale = () => {
+                    const factor = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+                    const x = (window.innerWidth - 1920 * factor) / 2;
+                    const y = (window.innerHeight - 1080 * factor) / 2;
+                    this.stage.style.transform = `translate(${x}px, ${y}px) scale(${factor})`;
+                };
+                scale();
+                window.addEventListener("resize", scale);
+            }
+
+            setupKeyboardNav() {
+                document.addEventListener("keydown", (event) => {
+                    const target = event.target;
+                    if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+                    if (target && target.getAttribute && target.getAttribute("contenteditable") === "true") return;
+                    if (event.key === "ArrowRight" || event.key === " " || event.key === "PageDown") {
+                        event.preventDefault();
+                        this.next();
+                    }
+                    if (event.key === "ArrowLeft" || event.key === "PageUp") {
+                        event.preventDefault();
+                        this.prev();
+                    }
+                    if (event.key === "Home") this.showSlide(0);
+                    if (event.key === "End") this.showSlide(this.slides.length - 1);
+                });
+            }
+
+            setupButtonNav() {
+                document.getElementById("prevBtn").addEventListener("click", () => this.prev());
+                document.getElementById("nextBtn").addEventListener("click", () => this.next());
+            }
+
+            setupSlideNav() {
+                if (!this.slideNav) return;
+                this.navButtons = this.slides.map((slide, index) => {
+                    const title = slide.querySelector("h1, h2")?.textContent?.trim() || `第 ${index + 1} 页`;
+                    const button = document.createElement("button");
+                    button.type = "button";
+                    button.setAttribute("aria-label", `跳转到第 ${index + 1} 页：${title}`);
+                    button.title = title;
+                    button.addEventListener("click", () => this.showSlide(index));
+                    this.slideNav.appendChild(button);
+                    return button;
+                });
+            }
+
+            setupTouchNav() {
+                let startX = 0;
+                let startY = 0;
+                window.addEventListener("touchstart", (event) => {
+                    startX = event.changedTouches[0].clientX;
+                    startY = event.changedTouches[0].clientY;
+                }, { passive: true });
+                window.addEventListener("touchend", (event) => {
+                    const dx = event.changedTouches[0].clientX - startX;
+                    const dy = event.changedTouches[0].clientY - startY;
+                    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy)) {
+                        dx < 0 ? this.next() : this.prev();
+                    }
+                }, { passive: true });
+            }
+
+            setupWheelNav() {
+                window.addEventListener("wheel", (event) => {
+                    if (this.wheelLocked || Math.abs(event.deltaY) < 35) return;
+                    this.wheelLocked = true;
+                    event.deltaY > 0 ? this.next() : this.prev();
+                    setTimeout(() => { this.wheelLocked = false; }, 520);
+                }, { passive: true });
+            }
+
+            showSlide(index) {
+                this.currentSlide = Math.max(0, Math.min(index, this.slides.length - 1));
+                this.slides.forEach((slide, i) => {
+                    slide.classList.toggle("active", i === this.currentSlide);
+                    slide.classList.toggle("visible", i === this.currentSlide);
+                });
+                this.pageText.textContent = `${this.currentSlide + 1} / ${this.slides.length}`;
+                if (this.navButtons) {
+                    this.navButtons.forEach((button, i) => button.classList.toggle("active", i === this.currentSlide));
+                }
+                this.progressFill.style.width = `${((this.currentSlide + 1) / this.slides.length) * 100}%`;
+            }
+
+            next() {
+                this.showSlide(this.currentSlide + 1);
+            }
+
+            prev() {
+                this.showSlide(this.currentSlide - 1);
+            }
+        }
+
+        /* === INLINE EDITOR === */
+        class InlineEditor {
+            constructor() {
+                this.isActive = false;
+                this.storageKey = "anytimespeak-roadshow-edits-v2";
+                this.editables = Array.from(document.querySelectorAll("[data-editable]"));
+                this.load();
+            }
+
+            toggleEditMode() {
+                this.isActive = !this.isActive;
+                document.body.classList.toggle("editing", this.isActive);
+                document.getElementById("editToggle").classList.toggle("active", this.isActive);
+                this.editables.forEach((el) => {
+                    el.setAttribute("contenteditable", this.isActive ? "true" : "false");
+                });
+                if (!this.isActive) this.save();
+            }
+
+            save() {
+                const data = this.editables.map((el) => el.innerHTML);
+                localStorage.setItem(this.storageKey, JSON.stringify(data));
+            }
+
+            load() {
+                const raw = localStorage.getItem(this.storageKey);
+                if (!raw) return;
+                try {
+                    const data = JSON.parse(raw);
+                    this.editables.forEach((el, index) => {
+                        if (typeof data[index] === "string") el.innerHTML = data[index];
+                    });
+                } catch (error) {
+                    console.warn("Could not load slide edits", error);
+                }
+            }
+        }
+
+        const presentation = new SlidePresentation();
+        const editor = new InlineEditor();
+
+        /* === CURSOR ACCENT BEHAVIOR === */
+        class CursorAccent {
+            constructor() {
+                this.orb = document.querySelector(".cursor-orb");
+                this.dot = document.querySelector(".cursor-dot");
+                this.target = { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+                this.current = { x: this.target.x, y: this.target.y };
+                this.enabled = window.matchMedia("(pointer: fine) and (prefers-reduced-motion: no-preference)").matches;
+                if (!this.enabled || !this.orb || !this.dot) return;
+                this.setup();
+                this.animate();
+            }
+
+            setup() {
+                window.addEventListener("pointermove", (event) => {
+                    this.target.x = event.clientX;
+                    this.target.y = event.clientY;
+                    document.body.classList.add("cursor-ready");
+                }, { passive: true });
+
+                window.addEventListener("pointerleave", () => {
+                    document.body.classList.remove("cursor-ready", "cursor-active");
+                });
+
+                document.querySelectorAll("button, .edit-hotzone, [data-editable]").forEach((element) => {
+                    element.addEventListener("mouseenter", () => document.body.classList.add("cursor-active"));
+                    element.addEventListener("mouseleave", () => document.body.classList.remove("cursor-active"));
+                });
+            }
+
+            animate() {
+                this.current.x += (this.target.x - this.current.x) * 0.18;
+                this.current.y += (this.target.y - this.current.y) * 0.18;
+                this.orb.style.transform = `translate3d(${this.current.x}px, ${this.current.y}px, 0) translate(-50%, -50%)`;
+                this.dot.style.transform = `translate3d(${this.target.x}px, ${this.target.y}px, 0) translate(-50%, -50%)`;
+                requestAnimationFrame(() => this.animate());
+            }
+        }
+
+        new CursorAccent();
+
+        /* === EDIT HOTZONE BEHAVIOR === */
+        const hotzone = document.querySelector(".edit-hotzone");
+        const editToggle = document.getElementById("editToggle");
+        let hideTimeout = null;
+
+        hotzone.addEventListener("mouseenter", () => {
+            clearTimeout(hideTimeout);
+            editToggle.classList.add("show");
+        });
+        hotzone.addEventListener("mouseleave", () => {
+            hideTimeout = setTimeout(() => {
+                if (!editor.isActive) editToggle.classList.remove("show");
+            }, 400);
+        });
+        editToggle.addEventListener("mouseenter", () => clearTimeout(hideTimeout));
+        editToggle.addEventListener("mouseleave", () => {
+            hideTimeout = setTimeout(() => {
+                if (!editor.isActive) editToggle.classList.remove("show");
+            }, 400);
+        });
+        editToggle.addEventListener("click", () => editor.toggleEditMode());
+        hotzone.addEventListener("click", () => editor.toggleEditMode());
+        document.addEventListener("keydown", (event) => {
+            const target = event.target;
+            if ((event.key === "e" || event.key === "E") && !(target && target.getAttribute && target.getAttribute("contenteditable") === "true")) {
+                editor.toggleEditMode();
+            }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+                event.preventDefault();
+                editor.save();
+            }
+        });
+    </script>
+</body>
+</html>
