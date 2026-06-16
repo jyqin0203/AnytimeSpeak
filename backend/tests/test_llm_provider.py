@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 
 import pytest
 
@@ -31,7 +31,7 @@ def test_chat_fallback_stays_mock_when_llm_env_is_missing(monkeypatch: pytest.Mo
     assert response.fallback_reason == "missing_api_key"
     assert response.reply.role == "assistant"
     assert "chicken sandwich" in response.reply.content.lower()
-    assert response.quick_feedback.score >= 70
+    assert not hasattr(response, "quick_feedback")
 
 
 def test_feedback_falls_back_to_mock_when_llm_call_fails(monkeypatch: pytest.MonkeyPatch):
@@ -233,6 +233,60 @@ def test_llm_timeout_allows_slow_provider_responses():
     assert llm_provider.LLM_TIMEOUT_SECONDS >= 90.0
 
 
+def test_chat_uses_shorter_provider_timeout():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.CHAT_TIMEOUT_SECONDS < llm_provider.LLM_TIMEOUT_SECONDS
+    assert llm_provider.CHAT_TIMEOUT_SECONDS <= 30.0
+
+
+def test_feedback_uses_shorter_provider_timeout():
+    import app.llm_provider as llm_provider
+
+    assert llm_provider.FEEDBACK_TIMEOUT_SECONDS < llm_provider.LLM_TIMEOUT_SECONDS
+    assert llm_provider.FEEDBACK_TIMEOUT_SECONDS <= 30.0
+
+
+def test_feedback_passes_shorter_timeout_to_provider(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    captured = {}
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        captured["timeout_seconds"] = timeout_seconds
+        return """
+        {
+          "what_you_said": "love story what about you",
+          "recommended_english": "I like Love Story. What about you?",
+          "issue": "你的意思清楚，可以把歌名和问句分开表达。",
+          "why": "这样说更自然，因为先表达自己的喜好，再单独问对方。",
+          "more_natural_option": "I really like Love Story. How about you?",
+          "score": 86,
+          "score_breakdown": {
+            "grammar": 88,
+            "naturalness": 84,
+            "relevance": 90,
+            "clarity": 86
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message="love story what about you")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert captured["timeout_seconds"] == llm_provider.FEEDBACK_TIMEOUT_SECONDS
+
+
 def test_llm_provider_info_logs_are_enabled():
     import app.llm_provider as llm_provider
 
@@ -247,7 +301,7 @@ def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         assert any("Return JSON only" in message["content"] for message in messages)
         return """
         {
@@ -282,6 +336,50 @@ def test_summary_uses_llm_when_mode_and_config_are_complete(monkeypatch: pytest.
     assert response.scores.overall == 85
 
 
+def test_summary_accepts_string_lists_score_breakdown_and_percent_scores(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return """
+        {
+          "summary": "You completed the practice.",
+          "strengths": "Clear meaning; Good scenario fit",
+          "repeated_issues": "Add more specific details",
+          "better_expressions": "Could you tell me more about that?",
+          "scenario_completion": "You handled the basic conversation.",
+          "next_practice_focus": "Practice shorter answers.",
+          "score_breakdown": {
+            "grammar": "86%",
+            "naturalness": "8/10",
+            "clarity": "84",
+            "relevance": 88,
+            "overall": "85%"
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_summary_with_fallback(
+        SummaryRequest(
+            scenario_id="daily_conversation",
+            messages=[ChatMessage(role="user", content="I am practicing small talk.")],
+        )
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.strengths == ["Clear meaning", "Good scenario fit"]
+    assert response.repeated_issues == ["Add more specific details"]
+    assert response.scores.expression == 80
+    assert response.scores.overall == 85
+
+
 def test_json_parser_accepts_markdown_code_fence_and_text():
     import app.llm_provider as llm_provider
 
@@ -291,6 +389,92 @@ def test_json_parser_accepts_markdown_code_fence_and_text():
     )
 
     assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_accepts_plain_json():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm('{"reply":{"role":"assistant","content":"Hi."}}', "chat")
+
+    assert parsed == {"reply": {"role": "assistant", "content": "Hi."}}
+
+
+def test_json_parser_extracts_first_valid_object_with_surrounding_text():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        'Sure, here is the JSON: {"reply":{"role":"assistant","content":"What happened?"}} Thanks.',
+        "chat",
+    )
+
+    assert parsed == {"reply": {"role": "assistant", "content": "What happened?"}}
+
+
+def test_json_parser_uses_first_valid_object_when_later_text_has_braces():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        'Result: {"provider":"llm","score":88} Note: {not valid json}',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_accepts_array_wrapped_object():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        '[{"provider":"llm","score":88}]',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_accepts_trailing_commas_and_smart_quotes():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        '{“provider”: “llm”, “score”: 88,}',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_accepts_simple_unquoted_keys():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        '{provider: "llm", score: 88}',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_feedback_falls_back_on_invalid_json_without_crashing(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+    monkeypatch.setattr(
+        llm_provider,
+        "_request_chat_completion",
+        lambda _messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS: "{not valid json",
+    )
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message="I am so 伤心.")
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "json_parse_failed"
+    assert response.recommended_english
+    assert response.why
 
 
 def test_json_parser_logs_operation_without_response_content(caplog: pytest.LogCaptureFixture):
@@ -306,6 +490,376 @@ def test_json_parser_logs_operation_without_response_content(caplog: pytest.LogC
     assert "operation=summary" in caplog.text
     assert f"response_length={len(content)}" in caplog.text
     assert content not in caplog.text
+
+
+def test_chat_repairs_missing_llm_reply_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    monkeypatch.setattr(
+        llm_provider,
+        "_request_chat_completion",
+        lambda _messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS: '{"reply": null}',
+    )
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="interview", latest_user_message="I feel nervous.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.content != "None"
+    assert response.reply.content
+
+
+def test_chat_accepts_plain_text_llm_reply_instead_of_json_parse_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return "I understand. What would you like to practice next?"
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="daily_conversation", latest_user_message="I want to practice.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.content == "I understand. What would you like to practice next?"
+
+
+def test_chat_accepts_common_content_field_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return '{"content": "I am sorry to hear that. What happened?"}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="daily_conversation", latest_user_message="I am so sad.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.content == "I am sorry to hear that. What happened?"
+
+
+def test_chat_accepts_reply_text_and_normalizes_role(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return '{"reply": {"role": "ai", "text": "I hear you. What happened?"}}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="daily_conversation", latest_user_message="I am sad.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.role == "assistant"
+    assert response.reply.content == "I hear you. What happened?"
+
+
+def test_chat_accepts_nested_reply_content_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return '{"reply": {"content": {"text": "That sounds tough. What happened?"}}}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(scenario_id="daily_conversation", latest_user_message="I am sad.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.reply.content == "That sounds tough. What happened?"
+
+
+def test_chat_falls_back_when_llm_repeats_previous_assistant_turn(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    repeated = "Welcome! Are you ready to order, or would you like a few recommendations first?"
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return f'{{"reply": {{"role": "assistant", "content": "{repeated}"}}}}'
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_chat_reply_with_fallback(
+        ChatRequest(
+            scenario_id="restaurant",
+            latest_user_message="A sandwich please.",
+            conversation_history=[
+                ChatMessage(role="assistant", content=repeated),
+                ChatMessage(role="user", content="A sandwich please."),
+            ],
+        )
+    )
+
+    assert response.provider == "mock"
+    assert response.fallback_reason == "llm_low_quality_reply"
+    assert response.reply.content != repeated
+
+
+def test_feedback_accepts_frontend_wording_aliases_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return """
+        {
+          "original_text": "I am so 伤心.",
+          "intent": "用户想表达自己现在很伤心。",
+          "recommended_expression": "I'm feeling really sad right now.",
+          "main_issue": "意思表达清楚，可以把情绪词说得更自然。",
+          "explanation": "你的意思表达清楚了。口语里可以用 I'm feeling really sad right now 来表达当下状态。",
+          "better_version": "I've been feeling really down lately.",
+          "score_breakdown": {
+            "grammar": 86,
+            "naturalness": 78,
+            "relevance": 92,
+            "clarity": 84
+          },
+          "provider": "llm"
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily_conversation", latest_user_message="I am so 伤心.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.what_you_said == "I am so 伤心."
+    assert response.recommended_english == "I'm feeling really sad right now."
+    assert response.more_natural_option == "I've been feeling really down lately."
+    assert response.score == 85
+
+
+def test_feedback_repairs_invalid_scores_without_schema_fallback(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return """
+        {
+          "what_you_said": "I want something not too spicy.",
+          "recommended_english": "I’d like something that isn’t too spicy.",
+          "issue": "你的意思清楚，可以换成更自然的点餐表达。",
+          "why": "这样说更礼貌，也更像在向服务员说明口味偏好。",
+          "more_natural_option": "Could you recommend a mild dish for me?",
+          "score": "N/A",
+          "score_breakdown": {
+            "grammar": "",
+            "naturalness": null,
+            "relevance": "good",
+            "clarity": "8/10"
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="restaurant", latest_user_message="I want something not too spicy.")
+    )
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.score == 82
+    assert response.score_breakdown.grammar == 82
+    assert response.score_breakdown.naturalness == 82
+    assert response.score_breakdown.relevance == 82
+    assert response.score_breakdown.clarity == 80
+
+
+def test_feedback_sanitizes_forbidden_mixed_input_criticism(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return """
+        {
+          "what_you_said": "I am so 伤心.",
+          "user_intent": "表达自己很伤心",
+          "recommended_english": "I'm feeling really sad right now.",
+          "issue": "使用中文词汇'伤心'不符合英语表达习惯",
+          "why": "直接混用中文词会破坏语言流畅性。",
+          "more_natural_option": "I've been feeling really down lately.",
+          "score": 70,
+          "score_breakdown": {
+            "grammar": 90,
+            "naturalness": 60,
+            "relevance": 90,
+            "clarity": 70
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message="I am so 伤心.")
+    )
+
+    forbidden = [
+        "不符合英语表达习惯",
+        "使用中文词汇",
+        "直接混用中文",
+        "破坏语言流畅性",
+    ]
+    combined = f"{response.issue} {response.why} {response.code_switching_tip}"
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.recommended_english == "I'm feeling really sad right now."
+    assert all(phrase not in combined for phrase in forbidden)
+    assert "sad" in response.why or "feeling down" in response.why
+
+
+def test_feedback_removes_prompt_labels_and_repairs_repeated_original(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    original = "I want to eat some delicious noodles do you want to join me"
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return """
+        {
+          "what_you_said": "I want to eat some delicious noodles do you want to join me",
+          "recommended_english": "I want to eat some delicious noodles do you want to join me",
+          "issue": "主要问题：这句话的意思已经清楚了，语音输入里的大小写或句号不用作为主要问题。",
+          "why": "主要问题：这句话的意思已经清楚了，语音输入里的大小写或句号不用作为主要问题。为什么：口语练习更应该关注表达是否自然、场景是否贴合，而不是只纠正识别文本里的标点。",
+          "more_natural_option": "I want to eat some delicious noodles do you want to join me",
+          "score": 85,
+          "score_breakdown": {
+            "grammar": 90,
+            "naturalness": 80,
+            "relevance": 100,
+            "clarity": 90
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message=original)
+    )
+
+    combined_feedback = f"{response.issue} {response.why}"
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.what_you_said == original
+    assert response.recommended_english != original
+    assert response.recommended_english == "I want to get some delicious noodles. Do you want to join me?"
+    assert response.more_natural_option == "I'm thinking of getting some delicious noodles. Would you like to come with me?"
+    assert "主要问题：" not in combined_feedback
+    assert "为什么：" not in combined_feedback
+    assert "计划" in response.why
+    assert "邀请" in response.why
+
+
+def test_feedback_ignores_punctuation_only_voice_transcript_corrections(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
+        return """
+        {
+          "what_you_said": "and would you like a drink",
+          "user_intent": "The learner is asking about a drink.",
+          "recommended_english": "And would you like a drink?",
+          "issue": "首字母和句末标点需要调整。",
+          "why": "加上大写和问号后更符合标点规则。",
+          "more_natural_option": "And would you like a drink?",
+          "score": 90,
+          "score_breakdown": {
+            "grammar": 90,
+            "naturalness": 90,
+            "relevance": 90,
+            "clarity": 90
+          },
+          "provider": "llm"
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="restaurant", latest_user_message="and would you like a drink")
+    )
+
+    assert response.provider == "llm"
+    assert response.recommended_english == "and would you like a drink"
+    assert response.more_natural_option == "and would you like a drink"
+    combined_feedback = f"{response.issue} {response.why}"
+    assert "语音输入" not in combined_feedback
+    assert "识别文本" not in combined_feedback
+    assert "大小写" not in combined_feedback
+    assert "句号" not in combined_feedback
+    assert "标点" not in combined_feedback
+    assert "主要问题" not in combined_feedback
+    assert "自然表达" in combined_feedback
+    assert "接话" in combined_feedback
 
 
 def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
@@ -330,7 +884,12 @@ def test_chat_prompt_includes_scenario_role_goal_and_code_switching_guidance():
     assert "Previous conversation" in prompt_text
     assert "Latest user message: 我想 check in early." in prompt_text
     assert "Chinese-English mixed input" in prompt_text
-    assert "ask exactly one specific clarifying question" in prompt_text
+    assert "Ask only one clear follow-up question" in prompt_text
+    assert "Do not provide detailed grammar correction in the chat reply" in prompt_text
+    assert "伤心" in prompt_text
+    assert "first respond with empathy" in prompt_text
+    assert "That sounds good" in prompt_text
+    assert "quick_feedback" not in prompt_text
     assert "gently steer the conversation back" in prompt_text
 
 
@@ -356,6 +915,9 @@ def test_feedback_prompt_supports_chinese_and_mixed_input_with_chinese_explanati
     assert "score_breakdown must contain integer fields grammar, naturalness, relevance" in prompt_text
     assert "中文" in prompt_text
     assert "不要羞辱用户" in prompt_text
+    assert "never criticize the learner for mixing" in prompt_text
+    assert "meaning is clear" in prompt_text
+    assert "sad, upset, feeling down" in prompt_text
 
 
 def test_summary_prompt_uses_goal_scoring_focus_and_code_switching_summary():
@@ -387,7 +949,7 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("LLM_MODEL", "demo-model")
 
-    def fake_chat_completion(messages):
+    def fake_chat_completion(messages, timeout_seconds=llm_provider.LLM_TIMEOUT_SECONDS):
         return """
         {
           "what_you_said": "I want to 预约一个 meeting tomorrow.",
@@ -421,3 +983,28 @@ def test_feedback_response_parses_code_switching_fields_when_llm_returns_them(mo
     assert response.recommended_english == "I want to schedule a meeting tomorrow."
     assert "schedule a meeting" in response.why
     assert response.provider == "llm"
+
+
+def test_llm_text_cleanup_removes_em_dash_repeated_punctuation_and_limits_length():
+    import app.llm_provider as llm_provider
+
+    cleaned = llm_provider._clean_llm_text(
+        "This is natural——but too excited!!!   Please listen??", 42
+    )
+
+    assert "—" not in cleaned
+    assert " - " not in cleaned
+    assert "!!!" not in cleaned
+    assert "??" not in cleaned
+    assert len(cleaned) <= 45
+
+
+def test_llm_text_cleanup_removes_separator_hyphens():
+    import app.llm_provider as llm_provider
+
+    cleaned = llm_provider._clean_llm_text(
+        "I'm nervous - this is my first interview - but I want to practice."
+    )
+
+    assert " - " not in cleaned
+    assert "nervous, this" in cleaned

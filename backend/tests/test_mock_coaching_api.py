@@ -84,8 +84,30 @@ def test_chat_endpoint_returns_scenario_aware_mock_reply():
     assert body["provider"] == "mock"
     assert "chicken sandwich" in body["reply"]["content"].lower()
     assert "onions" in body["reply"]["content"].lower()
-    assert body["quick_feedback"]["what_you_said"] == "I want a chicken sandwich, but no onion."
-    assert body["quick_feedback"]["score"] >= 70
+    assert "quick_feedback" not in body
+
+
+def test_mock_chat_avoids_repeating_previous_assistant_reply():
+    repeated_reply = (
+        "Sure. Would you like that for here or to go, or would you like a drink "
+        "with that?"
+    )
+    response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "restaurant",
+            "latest_user_message": "A sandwich please.",
+            "conversation_history": [
+                {"role": "assistant", "content": repeated_reply},
+                {"role": "user", "content": "A sandwich please."},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["reply"]["content"] != repeated_reply
+    assert "anything else" in body["reply"]["content"].lower()
 
 
 def test_feedback_endpoint_returns_correction_and_expression_tip():
@@ -112,6 +134,23 @@ def test_feedback_endpoint_returns_correction_and_expression_tip():
     assert set(body["score_breakdown"]) == {"grammar", "naturalness", "relevance", "clarity"}
     assert body["provider"] == "mock"
     assert 0 <= body["score"] <= 100
+
+
+def test_feedback_repairs_incomplete_drink_question_without_extra_connector():
+    response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "restaurant",
+            "latest_user_message": "and would you like a drink with",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["recommended_english"] == "Would you like a drink with that?"
+    assert body["more_natural_option"] == "Would you like a drink with that?"
+    assert "with 后面" in body["why"]
+    assert "recommendation" not in body["more_natural_option"].lower()
 
 
 def test_feedback_endpoint_improves_recently_question_mock_quality():
@@ -159,9 +198,140 @@ def test_feedback_endpoint_supports_chinese_input_with_english_suggestion():
     body = response.json()
     assert "schedule a meeting" in body["recommended_english"].lower()
     assert "tomorrow" in body["recommended_english"].lower()
-    assert "中文" in body["issue"]
+    assert "意思表达清楚" in body["issue"]
     assert "schedule a meeting" in body["more_natural_option"]
     assert body["user_intent"] == "我想约一个明天的会议。"
+
+
+def test_mock_chat_empathizes_with_mixed_negative_emotion():
+    response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "daily_conversation",
+            "latest_user_message": "I am so 伤心.",
+        },
+    )
+
+    assert response.status_code == 200
+    content = response.json()["reply"]["content"]
+    lowered = content.lower()
+    banned_phrases = ["that sounds good", "great", "nice", "awesome", "sounds fun"]
+
+    assert all(phrase not in lowered for phrase in banned_phrases)
+    assert any(
+        phrase in lowered
+        for phrase in ["sorry", "hard", "tough", "hear that", "feeling that way"]
+    )
+
+
+def test_mock_feedback_gently_rewrites_mixed_negative_emotion():
+    response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "daily_conversation",
+            "latest_user_message": "I am so 伤心.",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    suggested_text = f"{body['recommended_english']} {body['more_natural_option']}".lower()
+    why = body["why"]
+    forbidden = [
+        "不符合英语表达习惯",
+        "不应该使用中文",
+        "不能混合中文",
+        "而不是混合",
+        "主要问题是使用了中文",
+        "使用了中文词汇",
+    ]
+
+    assert any(word in suggested_text for word in ["sad", "upset", "down"])
+    assert all(phrase not in why for phrase in forbidden)
+    assert "紧扣" not in why
+    assert any(
+        phrase in why
+        for phrase in ["意思表达清楚", "sad", "upset", "feeling down", "I'm feeling", "当下的状态"]
+    )
+
+
+def test_mock_daily_plan_invitation_stays_on_latest_user_meaning():
+    message = (
+        "of course maybe after it's some delicious food I want to go to do my homework "
+        "do you want to go with me"
+    )
+
+    chat_response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "daily",
+            "latest_user_message": message,
+        },
+    )
+
+    assert chat_response.status_code == 200
+    chat_body = chat_response.json()
+    chat_text = chat_body["reply"]["content"].lower()
+    assert "tell me a little more about your day" not in chat_text
+    assert any(word in chat_text for word in ["lunch", "food", "homework", "join", "go", "plan"])
+
+    feedback_response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "daily",
+            "latest_user_message": message,
+        },
+    )
+
+    assert feedback_response.status_code == 200
+    feedback_body = feedback_response.json()
+    suggested = f"{feedback_body['recommended_english']} {feedback_body['more_natural_option']}".lower()
+    assert "after lunch" in suggested
+    assert "homework" in suggested
+    assert any(word in suggested for word in ["join me", "come with me"])
+    assert "时间 → 计划 → 邀请" in feedback_body["why"] or "顺序" in feedback_body["why"]
+
+
+def test_mock_interview_project_intro_gets_interviewer_follow_up():
+    response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "interview",
+            "latest_user_message": "I worked on an AI English speaking practice project.",
+        },
+    )
+
+    assert response.status_code == 200
+    text = response.json()["reply"]["content"].lower()
+    assert any(word in text for word in ["project", "challenge", "experience", "result"])
+    assert "day" not in text
+
+
+def test_mock_restaurant_preference_gets_server_recommendation():
+    chat_response = client.post(
+        "/api/chat",
+        json={
+            "scenario_id": "restaurant",
+            "latest_user_message": "I want something not too spicy.",
+        },
+    )
+
+    assert chat_response.status_code == 200
+    chat_text = chat_response.json()["reply"]["content"].lower()
+    assert any(word in chat_text for word in ["recommend", "mild", "prefer", "dish", "vegetables"])
+
+    feedback_response = client.post(
+        "/api/feedback",
+        json={
+            "scenario_id": "restaurant",
+            "latest_user_message": "I want something not too spicy.",
+        },
+    )
+
+    assert feedback_response.status_code == 200
+    body = feedback_response.json()
+    suggested = f"{body['recommended_english']} {body['more_natural_option']}".lower()
+    assert any(word in suggested for word in ["spicy", "mild", "recommend"])
 
 
 def test_chat_endpoint_supports_mixed_input_without_breaking_mock_fallback():
@@ -181,8 +351,7 @@ def test_chat_endpoint_supports_mixed_input_without_breaking_mock_fallback():
     assert body["scenario_id"] == "meeting"
     assert body["reply"]["role"] == "assistant"
     assert "meeting" in body["reply"]["content"].lower()
-    assert "schedule a meeting" in body["quick_feedback"]["more_natural_option"]
-    assert body["quick_feedback"]["why"]
+    assert "quick_feedback" not in body
 
 
 def test_summary_endpoint_returns_scores_and_reusable_suggestions():

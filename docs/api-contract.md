@@ -57,7 +57,7 @@ Request:
 
 ### POST /api/chat
 
-Sends the latest user message and receives the next role-play reply plus quick feedback.
+Sends the latest user message and receives the next role-play reply. This endpoint is intentionally limited to real-time dialogue and does not synchronously return per-turn feedback, summary, or pronunciation assessment.
 
 Request:
 
@@ -84,23 +84,6 @@ Response shape:
   "reply": {
     "role": "assistant",
     "content": "Thanks for the update. What specific API fields do you need from the backend team?"
-  },
-  "quick_feedback": {
-    "what_you_said": "I finished the page, but I have some problem with API.",
-    "user_intent": "The learner wants to report progress and describe a blocker.",
-    "recommended_english": "I finished the first version of the page, but I have a problem with the API.",
-    "issue": "Use an article and refer to the specific API.",
-    "why": "This sounds more complete and professional in a meeting update.",
-    "more_natural_option": "The main blocker is that I need the backend team to confirm the API response format.",
-    "score": 78,
-    "score_breakdown": {
-      "grammar": 76,
-      "naturalness": 78,
-      "relevance": 86,
-      "clarity": 80
-    },
-    "provider": "mock",
-    "fallback_reason": null
   },
   "provider": "mock",
   "fallback_reason": null

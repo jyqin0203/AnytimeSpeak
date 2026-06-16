@@ -78,6 +78,7 @@ function App() {
   const [statusText, setStatusText] = useState("正在连接练习服务...");
   const [voiceRecordings, setVoiceRecordings] = useState<Record<number, string>>({});
   const voiceRecordingsRef = useRef<Record<number, string>>({});
+  const feedbackRequestSeqRef = useRef(0);
 
   // User profile state
   const [authUser, setAuthUser] = useState<AuthUser | null>(() => loadStoredUser());
@@ -198,13 +199,18 @@ function App() {
 
       const id = Date.now();
       const userMessage: Message = { id, sender: "user", text };
+      const loadingMessage: Message = { id: id + 1, sender: "ai", text: "AI 正在回复...", isLoading: true };
       const conversationHistory = messages;
       const nextMessages = [...messages, userMessage];
+      const loadingMessages = [...nextMessages, loadingMessage];
+      const feedbackRequestSeq = feedbackRequestSeqRef.current + 1;
+      feedbackRequestSeqRef.current = feedbackRequestSeq;
 
-      setMessages(nextMessages);
+      setMessages(loadingMessages);
       setInput("");
       setSendStatus("loading");
       setFeedbackStatus("loading");
+      setStatusText("AI 正在回复...");
       if (recording) {
         setVoiceRecordings((current) => {
           const next = { ...current, [id]: recording.url };
@@ -213,62 +219,62 @@ function App() {
         });
       }
 
-      const [replyResult, feedbackResult] = await Promise.allSettled([
-        sendChatMessage(selected, sessionId, conversationHistory, userMessage),
-        fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage),
-      ]);
-
-      const reply =
-        replyResult.status === "fulfilled" ? replyResult.value.message : createLocalReply(selected, nextMessages);
-      setMessages([...nextMessages, reply]);
-
-      if (feedbackResult.status === "fulfilled") {
-        const feedbackForTurn: Feedback = {
-          ...feedbackResult.value,
-          pronunciationInputMode: inputMode,
-        };
-        setFeedback((current) => [...current, feedbackForTurn]);
-        setFeedbackStatus("idle");
-        if (inputMode === "voice") {
-          void assessPronunciation({
-            scenario: selected,
-            sessionId,
-            userMessage: userMessage.text,
-            transcript: userMessage.text,
-            referenceText: feedbackResult.value.recommendedEnglish,
-            audioDurationMs: recording?.durationMs,
-            recognizedLanguage: "en-US",
-            audio: recording?.blob ?? null,
-          })
-            .then((pronunciation) => {
-              setFeedback((current) =>
-                current.map((item) => (item.id === userMessage.id ? { ...item, pronunciation } : item)),
-              );
+      void fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage)
+        .then((turnFeedback) => {
+          const feedbackForTurn: Feedback = {
+            ...turnFeedback,
+            pronunciationInputMode: inputMode,
+          };
+          setFeedback((current) =>
+            [...current.filter((item) => item.id !== feedbackForTurn.id), feedbackForTurn].sort((a, b) => a.id - b.id),
+          );
+          if (feedbackRequestSeqRef.current === feedbackRequestSeq) {
+            setFeedbackStatus("idle");
+          }
+          if (inputMode === "voice") {
+            void assessPronunciation({
+              scenario: selected,
+              sessionId,
+              userMessage: userMessage.text,
+              transcript: userMessage.text,
+              referenceText: turnFeedback.recommendedEnglish,
+              audioDurationMs: recording?.durationMs,
+              recognizedLanguage: "en-US",
+              audio: recording?.blob ?? null,
             })
-            .catch(() => {
-              setFeedback((current) =>
-                current.map((item) =>
-                  item.id === userMessage.id ? { ...item, pronunciation: null, pronunciationInputMode: "voice" } : item,
-                ),
-              );
-            });
-        }
-      } else {
-        setFeedbackStatus("error");
-      }
+              .then((pronunciation) => {
+                setFeedback((current) =>
+                  current.map((item) => (item.id === userMessage.id ? { ...item, pronunciation } : item)),
+                );
+              })
+              .catch(() => {
+                setFeedback((current) =>
+                  current.map((item) =>
+                    item.id === userMessage.id ? { ...item, pronunciation: null, pronunciationInputMode: "voice" } : item,
+                  ),
+                );
+              });
+          }
+        })
+        .catch(() => {
+          if (feedbackRequestSeqRef.current === feedbackRequestSeq) {
+            setFeedbackStatus("error");
+          }
+        });
 
-      if (replyResult.status === "fulfilled" && feedbackResult.status === "fulfilled") {
-        setSource(sourceFromProvider(feedbackResult.value.provider));
+      try {
+        const replyResult = await sendChatMessage(selected, sessionId, conversationHistory, userMessage);
+        const reply = { ...replyResult.message, id: loadingMessage.id };
+        setMessages([...nextMessages, reply]);
+        setSource(sourceFromProvider(replyResult.provider));
         setSendStatus("idle");
-        setStatusText(providerStatusText(feedbackResult.value.provider, feedbackResult.value.fallbackReason));
-      } else if (replyResult.status === "fulfilled") {
-        setSource(sourceFromProvider(replyResult.value.provider));
-        setSendStatus("idle");
-        setStatusText("AI 回复来自后端，但本轮反馈暂时不可用，可继续对话。");
-      } else {
+        setStatusText(providerStatusText(replyResult.provider, replyResult.fallbackReason));
+      } catch {
+        const fallbackReply = { ...createLocalReply(selected, nextMessages), id: loadingMessage.id };
+        setMessages([...nextMessages, fallbackReply]);
         setSource("local-fallback");
         setSendStatus("error");
-        setStatusText("前端完全请求不到后端，本轮对话已使用前端本地模式继续。");
+        setStatusText("当前使用本地 fallback 回复。");
       }
     },
     [messages, selected, sendStatus, sessionId],
@@ -1076,7 +1082,7 @@ function Practice({
   const latestScore = latestFeedback?.score ?? null;
   const latestAiMessage = [...messages].reverse().find((message) => message.sender === "ai");
   const latestAiText = latestAiMessage?.text ?? scenario.openingLine;
-  const lastSpokenAiId = useRef<number | null>(null);
+  const lastSpokenAiKey = useRef<string | null>(null);
   const latestTranscriptRef = useRef("");
   const playbackRef = useRef<HTMLAudioElement | null>(null);
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
@@ -1104,8 +1110,10 @@ function Practice({
   }, [asrProvider.id, speechInput.error, onAsrFallback]);
 
   useEffect(() => {
-    if (!latestAiMessage || latestAiMessage.id === lastSpokenAiId.current) return;
-    lastSpokenAiId.current = latestAiMessage.id;
+    if (!latestAiMessage || latestAiMessage.isLoading) return;
+    const spokenKey = `${latestAiMessage.id}:${latestAiMessage.text}`;
+    if (spokenKey === lastSpokenAiKey.current) return;
+    lastSpokenAiKey.current = spokenKey;
     speechOutput.speak(latestAiMessage.text);
   }, [latestAiMessage, speechOutput]);
 
@@ -1113,13 +1121,18 @@ function Practice({
     if (speechInput.isListening || speechInput.isRestarting) {
       speechInput.stopListening();
       const transcript = latestTranscriptRef.current.trim() || speechInput.transcript.trim();
-      void voiceRecorder.stopRecording().then((recording) => {
-        if (transcript) {
-          onSendText(transcript, recording);
+      void voiceRecorder
+        .stopRecording()
+        .then((recording) => {
+          if (transcript) {
+            onSendText(transcript, recording);
+          }
+        })
+        .finally(() => {
           speechInput.resetTranscript();
           latestTranscriptRef.current = "";
-        }
-      });
+          onInput("");
+        });
       return;
     }
 
@@ -1284,8 +1297,8 @@ function Practice({
           </div>
         ) : feedbackStatus === "error" ? (
           <div className="empty-state error">
-            <strong>本轮反馈暂时不可用</strong>
-            <p>本轮反馈生成失败，这里不会展示历史反馈。请继续对话，下一轮会重新尝试。</p>
+            <strong>本轮表达反馈生成失败，可以继续练习。</strong>
+            <p>这里不会展示历史反馈，下一轮发送后会重新尝试分析你的表达。</p>
           </div>
         ) : feedback.length === 0 ? (
           <div className="empty-state">
@@ -1307,8 +1320,8 @@ function Practice({
                 </div>
                 <div>
                   <span>为什么这样更自然</span>
-                  <p>主要问题：{latestFeedback.issue}</p>
-                  <p>为什么：{latestFeedback.why}</p>
+                  <p>{latestFeedback.issue}</p>
+                  <p>{latestFeedback.why}</p>
                 </div>
                 <div>
                   <span>更自然的说法</span>
@@ -1514,6 +1527,7 @@ function SummaryList({ title, items }: { title: string; items: string[] }) {
 export default App;
 
 function loadingLabel(text: string): string {
+  if (text.includes("回复")) return "AI 正在回复";
   if (text.includes("分析")) return "正在分析";
   if (text.includes("总结")) return "正在总结";
   return "AI 思考中";

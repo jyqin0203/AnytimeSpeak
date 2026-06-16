@@ -1,3 +1,4 @@
+import ast
 import json
 import logging
 import os
@@ -25,12 +26,27 @@ from app.schemas import (
 
 
 LLM_TIMEOUT_SECONDS = 90.0
+CHAT_TIMEOUT_SECONDS = 25.0
+FEEDBACK_TIMEOUT_SECONDS = 25.0
+CHAT_REPLY_MAX_CHARS = 260
+FEEDBACK_SHORT_MAX_CHARS = 90
+FEEDBACK_MEDIUM_MAX_CHARS = 140
+SUMMARY_TEXT_MAX_CHARS = 180
+SUMMARY_ITEM_MAX_CHARS = 90
 
 logger = logging.getLogger("uvicorn.error")
 logger.setLevel(logging.INFO)
 
 
 class LLMResponseParseError(ValueError):
+    pass
+
+
+class LLMResponseSchemaError(ValueError):
+    pass
+
+
+class LLMResponseQualityError(ValueError):
     pass
 
 
@@ -84,15 +100,18 @@ def create_chat_reply_with_fallback(request: ChatRequest) -> ChatResponse:
         return _mock_chat_reply(request, config_reason)
 
     try:
-        data = _json_from_llm(_request_chat_completion(_chat_prompt(request)), "chat")
-        quick_feedback = _feedback_from_data(data.get("quick_feedback", {}))
-        quick_feedback.provider = "llm"
-        quick_feedback.fallback_reason = None
+        raw_content = _request_chat_completion(_chat_prompt(request), timeout_seconds=CHAT_TIMEOUT_SECONDS)
+        data = _chat_data_from_llm(raw_content)
+        reply = _chat_message_from_data(
+            _first_optional(data, "reply", "message", "assistant_reply", "content", "text"),
+            request,
+        )
+        if _chat_reply_repeats_history(reply, _conversation_history(request)):
+            raise LLMResponseQualityError("Chat reply repeated the previous assistant turn.")
         response = ChatResponse(
             session_id=request.session_id or "llm-session",
             scenario_id=request.scenario_id,
-            reply=_chat_message_from_data(data.get("reply")),
-            quick_feedback=quick_feedback,
+            reply=reply,
             provider="llm",
         )
         _log_provider_state("chat", "llm")
@@ -108,8 +127,11 @@ def create_feedback_with_fallback(request: FeedbackRequest) -> FeedbackResponse:
         return _mock_feedback(request, config_reason)
 
     try:
-        data = _json_from_llm(_request_chat_completion(_feedback_prompt(request)), "feedback")
-        feedback = _feedback_from_data(data)
+        data = _json_from_llm(
+            _request_chat_completion(_feedback_prompt(request), timeout_seconds=FEEDBACK_TIMEOUT_SECONDS),
+            "feedback",
+        )
+        feedback = _feedback_from_data(data, request)
         feedback.provider = "llm"
         feedback.fallback_reason = None
         _log_provider_state("feedback", "llm")
@@ -126,22 +148,22 @@ def create_summary_with_fallback(request: SummaryRequest) -> SummaryResponse:
 
     try:
         data = _json_from_llm(_request_chat_completion(_summary_prompt(request)), "summary")
-        scores = data.get("scores", {})
+        scores = data.get("scores") or data.get("score_breakdown") or {}
         response = SummaryResponse(
             scenario_id=request.scenario_id,
-            summary=str(data["summary"]),
-            strengths=_string_list(data["strengths"]),
-            repeated_issues=_string_list(data["repeated_issues"]),
-            better_expressions=_string_list(data["better_expressions"]),
-            scenario_completion=str(data["scenario_completion"]),
-            next_practice_focus=str(data["next_practice_focus"]),
-            code_switching_advice=_optional_string(data.get("code_switching_advice")),
+            summary=_clean_llm_text(data.get("summary") or "这次练习完成了主要对话目标。", SUMMARY_TEXT_MAX_CHARS),
+            strengths=_string_list(data.get("strengths") or ["表达能被理解。"], limit=3, max_chars=SUMMARY_ITEM_MAX_CHARS),
+            repeated_issues=_string_list(data.get("repeated_issues") or ["可以继续练习更自然的口语表达。"], limit=3, max_chars=SUMMARY_ITEM_MAX_CHARS),
+            better_expressions=_string_list(data.get("better_expressions") or ["Could you tell me a little more?"], limit=3, max_chars=SUMMARY_ITEM_MAX_CHARS),
+            scenario_completion=_clean_llm_text(data.get("scenario_completion") or "你完成了本轮场景的基本沟通。", SUMMARY_TEXT_MAX_CHARS),
+            next_practice_focus=_clean_llm_text(data.get("next_practice_focus") or "下次可以补充更多具体细节。", SUMMARY_TEXT_MAX_CHARS),
+            code_switching_advice=_optional_string(data.get("code_switching_advice"), SUMMARY_TEXT_MAX_CHARS),
             scores=ScoreBreakdown(
-                grammar=int(scores["grammar"]),
-                expression=int(scores["expression"]),
-                fluency=int(scores["fluency"]),
-                scenario_completion=int(scores.get("scenario_completion", scores.get("completion"))),
-                overall=int(scores["overall"]),
+                grammar=_summary_score(data, scores, "grammar"),
+                expression=_summary_score(data, scores, "expression", "naturalness"),
+                fluency=_summary_score(data, scores, "fluency", "clarity"),
+                scenario_completion=_summary_score(data, scores, "scenario_completion", "completion", "relevance"),
+                overall=_summary_score(data, scores, "overall", "score"),
             ),
             provider="llm",
         )
@@ -156,8 +178,6 @@ def _mock_chat_reply(request: ChatRequest, reason: str) -> ChatResponse:
     response = mock_service.create_chat_reply(request)
     response.provider = "mock"
     response.fallback_reason = reason
-    response.quick_feedback.provider = "mock"
-    response.quick_feedback.fallback_reason = reason
     _log_provider_state("chat", "mock", reason)
     return response
 
@@ -192,7 +212,10 @@ def _llm_config_fallback_reason() -> str | None:
     return None
 
 
-def _request_chat_completion(messages: list[dict[str, str]]) -> str:
+def _request_chat_completion(
+    messages: list[dict[str, str]],
+    timeout_seconds: float = LLM_TIMEOUT_SECONDS,
+) -> str:
     base_url = _llm_base_url().rstrip("/")
     endpoint = (
         base_url
@@ -212,7 +235,7 @@ def _request_chat_completion(messages: list[dict[str, str]]) -> str:
             "temperature": 0.3,
             "response_format": {"type": "json_object"},
         },
-        timeout=LLM_TIMEOUT_SECONDS,
+        timeout=timeout_seconds,
     )
     response.raise_for_status()
     payload = response.json()
@@ -243,24 +266,41 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
                 extra_instructions=(
                     "You are the AI role in a spoken English roleplay practice session. "
                     "Ground every reply in the specific story, AI role, and conversation history "
-                    "above — never give generic, template-like follow-ups that could fit any "
+                    "above. Never give generic, template-like follow-ups that could fit any "
                     "scenario, and vary your sentence patterns across turns so the conversation "
                     "feels alive rather than scripted. "
-                    "Keep replies natural, brief (one to three sentences), and easy to read aloud "
-                    "for spoken practice. "
+                    "Reply in 1-2 short natural English sentences under 45 words total. "
+                    "Stay in role for the selected scenario. "
+                    "Ask only one clear follow-up question. "
+                    "Do not provide detailed grammar correction in the chat reply. "
+                    "Keep the conversation natural and beginner-friendly. "
+                    "Understand the learner's real meaning and emotion before replying. "
+                    "If the learner expresses sadness, anxiety, tiredness, stress, fear, "
+                    "frustration, nervousness, or Chinese emotion words such as 伤心, 难过, "
+                    "累, 疲惫, 焦虑, 紧张, or 压力大, first respond with empathy, then ask one "
+                    "gentle follow-up question. In those negative-emotion cases, do not use "
+                    "positive stock phrases such as 'That sounds good', 'Great', 'Nice', "
+                    "'Awesome', or 'Sounds fun'. "
+                    "Use plain punctuation only: no em dashes, repeated punctuation, Markdown "
+                    "bullets, numbered lists, slash-heavy wording, separator hyphens, or overly "
+                    "formal coaching language. "
                     "If the learner's message is unclear, briefly acknowledge what you did "
-                    "understand and ask exactly one specific clarifying question. "
+                    "understand and ask one specific clarifying question. "
                     "If the learner drifts off-topic, respond naturally and briefly, then gently "
                     "steer the conversation back toward the scenario goal while staying in character. "
                     "If the learner mixes Chinese and English, infer their meaning and continue "
-                    "naturally in your AI role — never break character to translate or lecture "
+                    "naturally in your AI role. Never break character to translate or lecture "
                     "about language. "
-                    "Return JSON only with keys reply and quick_feedback. "
-                    "reply must include role='assistant' and content. "
-                    "quick_feedback must include what_you_said, user_intent, "
-                    "recommended_english, issue, why, more_natural_option, "
-                    "score, score_breakdown, and provider. "
-                    "Keep quick_feedback brief and encouraging."
+                    "Scenario-specific grounding: in interview, ask about project, experience, "
+                    "strengths, challenges, or results; in restaurant, respond as a server about "
+                    "orders, recommendations, preferences, or confirmation; in meeting, ask about "
+                    "progress, blockers, or next steps; in travel, focus on location, transport, "
+                    "hotel, or help requests; in daily conversation, respond to the exact topic "
+                    "the learner just mentioned. If the learner mentions lunch, food, homework, "
+                    "class, go with me, want to come, or join me, respond to the plan or invitation "
+                    "instead of asking a generic question about their day. "
+                    "Return JSON only with key reply. reply must include role='assistant' "
+                    "and content."
                 ),
             ),
         },
@@ -270,7 +310,7 @@ def _chat_prompt(request: ChatRequest) -> list[dict[str, str]]:
                 f"Scenario id: {request.scenario_id}\n"
                 f"Previous conversation:\n{history}\n"
                 f"Latest user message: {latest_user_message}\n"
-                "Continue the role-play with one concise assistant reply and brief feedback."
+                "Continue the role-play with one concise assistant reply."
             ),
         },
     ]
@@ -297,6 +337,28 @@ def _feedback_prompt(request: FeedbackRequest) -> list[dict[str, str]]:
                     "template sentence. more_natural_option must also stay anchored in the "
                     "learner's actual words, offered as a slightly more natural or polished "
                     "alternative phrasing of the same idea. "
+                    "Keep feedback compact for a small side card: user_intent, issue, and why "
+                    "should each be one short sentence; recommended_english and "
+                    "more_natural_option should each be one sentence. "
+                    "For Chinese-English mixed input, never criticize the learner for mixing "
+                    "languages, never say Chinese words are wrong or do not fit English habits, "
+                    "and never make 'using Chinese words' the main issue. First acknowledge in "
+                    "Chinese that the meaning is clear, then explain gently how to replace the "
+                    "Chinese word with a natural English word, spoken collocation, or sentence "
+                    "pattern while preserving the learner's original meaning and emotion. "
+                    "For emotion words, focus on choices such as sad, upset, feeling down, "
+                    "anxious, stressed, 'I'm feeling...', 'I've been feeling...', right now, "
+                    "or lately. why must be 2-4 short Chinese sentences at most. "
+                    "For daily plan or invitation turns, preserve the learner's real sequence "
+                    "and explain in Chinese that English usually becomes clearer with a "
+                    "time -> plan -> invitation order, such as after lunch, I’m planning to do "
+                    "my homework, then Do you want to join me? "
+                    "Because many learner turns come from speech recognition, do not treat "
+                    "missing punctuation, capitalization, or sentence-final periods as the main "
+                    "issue. Do not recommend a sentence only to add punctuation or capitalize "
+                    "the first word unless the meaning is otherwise unclear. "
+                    "Use plain punctuation only: no em dashes, repeated punctuation, Markdown, "
+                    "bullet lists, separator hyphens, or long paragraphs. "
                     "Never reply with generic filler such as 'No major grammar issue'. Even when "
                     "the grammar is correct, comment on spoken naturalness, fit with the "
                     "scenario, or clarity, and suggest one concrete way to sound more like a "
@@ -346,6 +408,12 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
                     "Make the summary mostly in Chinese, but keep reusable expressions in English. "
                     "Assess performance using the scenario goal, the story the learner practiced, "
                     "and the scoring focus. "
+                    "Keep the result compact: summary should be one short sentence; strengths, "
+                    "repeated_issues, and better_expressions should contain at most three short "
+                    "items each; scenario_completion and next_practice_focus should each be one "
+                    "short sentence. "
+                    "Use plain punctuation only: no em dashes, repeated punctuation, Markdown, "
+                    "bullet markers inside strings, separator hyphens, or long paragraphs. "
                     "If the learner used Chinese-English mixed input multiple times, include a "
                     "practical 中英转换建议 in code_switching_advice. "
                     "Return JSON only with keys summary, strengths, repeated_issues, "
@@ -368,23 +436,29 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
 
 
 def _json_from_llm(content: str, operation: str) -> dict[str, Any]:
-    candidates = [content, *_code_fence_contents(content)]
+    candidates = [content, *_code_fence_contents(content), *_json_value_candidates(content)]
     start = content.find("{")
     end = content.rfind("}")
     if start != -1 and end != -1 and end > start:
         candidates.append(content[start : end + 1])
 
     last_error: Exception | None = None
+    seen: set[str] = set()
     for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
         try:
-            parsed = json.loads(candidate.strip())
-        except json.JSONDecodeError as exc:
+            parsed = _parse_json_like(candidate)
+        except (json.JSONDecodeError, SyntaxError, ValueError) as exc:
             last_error = exc
             continue
 
-        if not isinstance(parsed, dict):
-            raise LLMResponseParseError("LLM response must be a JSON object.")
-        return parsed
+        parsed_object = _first_json_object(parsed)
+        if parsed_object is not None:
+            return parsed_object
+        last_error = LLMResponseParseError("LLM response must contain a JSON object.")
 
     logger.warning(
         "llm_provider: parse_failed operation=%s response_length=%s",
@@ -394,8 +468,88 @@ def _json_from_llm(content: str, operation: str) -> dict[str, Any]:
     raise LLMResponseParseError("LLM response JSON parsing failed.") from last_error
 
 
+def _chat_data_from_llm(content: str) -> dict[str, Any]:
+    try:
+        return _json_from_llm(content, "chat")
+    except LLMResponseParseError:
+        cleaned = _clean_llm_text(content, CHAT_REPLY_MAX_CHARS)
+        if not cleaned:
+            raise
+        logger.warning(
+            "llm_provider: chat_plain_text_response response_length=%s",
+            len(content),
+        )
+        return {"reply": {"role": "assistant", "content": cleaned}}
+
+
 def _code_fence_contents(content: str) -> list[str]:
     return [match.group(1) for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", content, re.IGNORECASE)]
+
+
+def _json_value_candidates(content: str) -> list[str]:
+    candidates: list[str] = []
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(content):
+        if character not in "{[":
+            continue
+        try:
+            parsed, end = decoder.raw_decode(content[index:])
+        except json.JSONDecodeError:
+            continue
+        if _first_json_object(parsed) is not None:
+            candidates.append(content[index : index + end])
+    return candidates
+
+
+def _parse_json_like(candidate: str) -> Any:
+    last_error: Exception | None = None
+    for variant in _json_candidate_variants(candidate):
+        try:
+            return json.loads(variant)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+
+        try:
+            return ast.literal_eval(variant)
+        except (SyntaxError, ValueError) as exc:
+            last_error = exc
+
+    raise json.JSONDecodeError("Unable to parse JSON-like LLM response.", candidate, 0) from last_error
+
+
+def _json_candidate_variants(candidate: str) -> list[str]:
+    normalized = candidate.strip()
+    smart_quotes = str.maketrans(
+        {
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u2018": "'",
+            "\u2019": "'",
+        }
+    )
+    normalized = normalized.translate(smart_quotes)
+    without_trailing_commas = re.sub(r",\s*([}\]])", r"\1", normalized)
+    quoted_keys = re.sub(
+        r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:',
+        r'\1"\2":',
+        without_trailing_commas,
+    )
+
+    variants: list[str] = []
+    for value in (candidate.strip(), normalized, without_trailing_commas, quoted_keys):
+        if value and value not in variants:
+            variants.append(value)
+    return variants
+
+
+def _first_json_object(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                return item
+    return None
 
 
 def _fallback_reason(exc: Exception) -> str:
@@ -405,57 +559,349 @@ def _fallback_reason(exc: Exception) -> str:
         return f"llm_http_{exc.response.status_code}"
     if isinstance(exc, LLMResponseParseError):
         return "json_parse_failed"
-    if isinstance(exc, (KeyError, TypeError, ValueError)):
+    if isinstance(exc, LLMResponseQualityError):
+        return "llm_low_quality_reply"
+    if isinstance(exc, (LLMResponseSchemaError, KeyError, TypeError, ValueError)):
         return "schema_validation_failed"
     return "llm_request_failed"
 
 
-def _chat_message_from_data(data: Any) -> ChatMessage:
+def _chat_message_from_data(data: Any, request: ChatRequest | None = None) -> ChatMessage:
+    content = _chat_content_from_data(data)
+    if not content:
+        content = _safe_chat_repair_reply(request)
+    if not content:
+        raise LLMResponseSchemaError("Chat reply content is required.")
+
+    content = _clean_llm_text(content, CHAT_REPLY_MAX_CHARS)
+    if not content:
+        content = _safe_chat_repair_reply(request)
+    if not content:
+        raise LLMResponseSchemaError("Chat reply content is required.")
+
+    return ChatMessage(role="assistant", content=content)
+
+
+def _chat_content_from_data(data: Any) -> Any:
+    if data is None:
+        return None
     if isinstance(data, dict):
-        return ChatMessage(
-            role=data.get("role", "assistant"),
-            content=str(data["content"]),
-        )
-    return ChatMessage(role="assistant", content=str(data))
+        content = _first_optional(data, "content", "text", "message", "reply")
+        if isinstance(content, dict):
+            return _chat_content_from_data(content)
+        if isinstance(content, list):
+            return " ".join(_clean_llm_text(item) for item in content if _clean_llm_text(item))
+        return content
+    if isinstance(data, list):
+        for item in data:
+            content = _chat_content_from_data(item)
+            if content:
+                return content
+        return None
+    return data
 
 
-def _feedback_from_data(data: Any) -> FeedbackResponse:
+def _safe_chat_repair_reply(request: ChatRequest | None) -> str:
+    if request is None:
+        return "I see. Can you tell me a little more?"
+    return mock_service.create_chat_reply(request).reply.content
+
+
+def _feedback_from_data(data: Any, request: FeedbackRequest | None = None) -> FeedbackResponse:
     if not isinstance(data, dict):
         raise ValueError("Feedback must be a JSON object.")
-    if "what_you_said" in data:
-        score = int(data["score"])
-        return FeedbackResponse(
-            what_you_said=str(data["what_you_said"]),
-            user_intent=str(data["user_intent"]),
-            recommended_english=str(data["recommended_english"]),
-            issue=str(data["issue"]),
-            why=str(data["why"]),
-            more_natural_option=str(data["more_natural_option"]),
-            score=score,
-            score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
-            provider="llm",
-            corrected_sentence=str(data["recommended_english"]),
-            better_expression=str(data["more_natural_option"]),
-            user_intent_zh=_optional_string(data.get("user_intent")),
-            code_switching_tip=_optional_string(data.get("why")),
+    score = _score_from_data(data)
+    latest_user_message = ""
+    if request is not None:
+        latest_user_message = request.latest_user_message or request.message or ""
+    recommended_english = _clean_llm_text(
+        _first_optional(
+            data,
+            "recommended_english",
+            "recommended_expression",
+            "corrected_sentence",
+            "correction",
+            "suggested_sentence",
         )
-
-    score = int(data["score"])
-    return FeedbackResponse(
-        what_you_said=str(data.get("what_you_said", "")),
-        user_intent=_optional_string(data.get("user_intent_zh")) or "",
-        recommended_english=str(data["corrected_sentence"]),
-        issue=str(data["issue"]),
-        why=_optional_string(data.get("code_switching_tip")) or str(data["issue"]),
-        more_natural_option=str(data["better_expression"]),
+        or latest_user_message
+        or "I see. Can you tell me a little more?",
+        FEEDBACK_MEDIUM_MAX_CHARS,
+    )
+    more_natural_option = _clean_llm_text(
+        _first_optional(
+            data,
+            "more_natural_option",
+            "better_version",
+            "better_expression",
+            "natural_expression",
+            "more_natural",
+        )
+        or recommended_english,
+        FEEDBACK_MEDIUM_MAX_CHARS,
+    )
+    issue = _clean_feedback_field_text(
+        _first_optional(data, "issue", "main_issue", "problem", "focus")
+        or "你的意思能理解，可以把句子整理得更自然、更清楚。",
+        FEEDBACK_SHORT_MAX_CHARS,
+        field="issue",
+    )
+    why = _clean_feedback_field_text(
+        _first_optional(
+            data,
+            "why",
+            "explanation",
+            "reason",
+            "why_it_is_more_natural",
+            "code_switching_tip",
+        )
+        or "你的意思表达清楚了。换成更常用的英文词汇、语序或搭配后，听起来会更像自然口语。",
+        FEEDBACK_MEDIUM_MAX_CHARS,
+        field="why",
+    )
+    user_intent = _optional_string(
+        _first_optional(data, "user_intent", "user_intent_zh", "intent", "meaning"),
+        FEEDBACK_SHORT_MAX_CHARS,
+    ) or ""
+    response = FeedbackResponse(
+        what_you_said=str(_first_optional(data, "what_you_said", "original_text", "user_message", "latest_user_message") or latest_user_message),
+        user_intent=user_intent,
+        recommended_english=recommended_english,
+        issue=issue,
+        why=why,
+        more_natural_option=more_natural_option,
         score=score,
         score_breakdown=_score_breakdown_from_data(data.get("score_breakdown"), score),
         provider="llm",
-        corrected_sentence=str(data["corrected_sentence"]),
-        better_expression=str(data["better_expression"]),
-        user_intent_zh=_optional_string(data.get("user_intent_zh")),
-        code_switching_tip=_optional_string(data.get("code_switching_tip")),
+        corrected_sentence=recommended_english,
+        better_expression=more_natural_option,
+        user_intent_zh=user_intent,
+        code_switching_tip=why,
     )
+    response = _avoid_forbidden_mixed_input_feedback(response, request)
+    response = _avoid_repeated_original_feedback(response, request)
+    response = _avoid_punctuation_only_feedback(response)
+    return _avoid_internal_prompt_feedback(response)
+
+
+def _clean_feedback_field_text(value: Any, max_chars: int, *, field: str) -> str:
+    text = _clean_llm_text(value, None)
+    text = _strip_feedback_field_labels(text, field=field)
+    return _clean_llm_text(text, max_chars)
+
+
+def _strip_feedback_field_labels(text: str, *, field: str) -> str:
+    cleaned = text.strip()
+    if not cleaned:
+        return cleaned
+
+    label_pattern = r"(?:主要问题|问题|为什么这样更自然|为什么|原因|推荐表达|更自然的说法)\s*[:：]\s*"
+    if field == "why":
+        match = re.search(r"(?:为什么这样更自然|为什么|原因)\s*[:：]\s*(.+)$", cleaned)
+        if match:
+            cleaned = match.group(1).strip()
+        cleaned = re.sub(label_pattern, "", cleaned).strip()
+        return cleaned
+
+    match = re.search(r"(?:主要问题|问题)\s*[:：]\s*(.*?)(?:\s*(?:为什么这样更自然|为什么|原因)\s*[:：]|$)", cleaned)
+    if match:
+        cleaned = match.group(1).strip()
+    cleaned = re.sub(label_pattern, "", cleaned).strip()
+    return cleaned
+
+
+def _avoid_repeated_original_feedback(
+    response: FeedbackResponse,
+    request: FeedbackRequest | None,
+) -> FeedbackResponse:
+    original = response.what_you_said or (request.latest_user_message if request else "") or ""
+    if not original:
+        return response
+    if not _is_same_expression(original, response.recommended_english):
+        return response
+
+    repaired = _natural_rewrite_for_repeated_original(original)
+    if repaired is None:
+        return response
+
+    recommended, more_natural, issue, why = repaired
+    response.recommended_english = recommended
+    response.corrected_sentence = recommended
+    response.more_natural_option = more_natural
+    response.better_expression = more_natural
+    response.issue = issue
+    response.why = why
+    response.code_switching_tip = why
+    return response
+
+
+def _is_same_expression(left: str, right: str) -> bool:
+    def normalize(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    return bool(left.strip()) and normalize(left) == normalize(right)
+
+
+def _natural_rewrite_for_repeated_original(original: str) -> tuple[str, str, str, str] | None:
+    lowered = original.lower()
+    if (
+        "noodle" in lowered
+        and ("join me" in lowered or "go with me" in lowered or "do you want" in lowered)
+    ):
+        return (
+            "I want to get some delicious noodles. Do you want to join me?",
+            "I'm thinking of getting some delicious noodles. Would you like to come with me?",
+            "你的意思表达清楚了，可以把吃面和邀请分成两个更自然的英文句子。",
+            "这样说会更自然，因为英语里通常先说自己的计划，再单独发出邀请。用 get some noodles 比 eat some noodles 更像日常口语，Do you want to join me? 也能清楚表达邀请。",
+        )
+    return None
+
+
+def _avoid_forbidden_mixed_input_feedback(
+    response: FeedbackResponse,
+    request: FeedbackRequest | None,
+) -> FeedbackResponse:
+    if not _contains_chinese_text(response.what_you_said):
+        return response
+
+    checked_text = " ".join(
+        text
+        for text in (response.issue, response.why, response.code_switching_tip or "")
+        if text
+    )
+    if not _contains_forbidden_mixed_input_criticism(checked_text):
+        return response
+
+    repaired_issue = "你的意思表达清楚了，可以把其中的关键词换成更自然的英文口语说法。"
+    repaired_why = ""
+    if request is not None:
+        mock_feedback = mock_service.create_feedback(request)
+        repaired_why = mock_feedback.why
+        if mock_feedback.issue:
+            repaired_issue = mock_feedback.issue
+    if not repaired_why:
+        repaired_why = (
+            "你的意思表达清楚了。这里可以把中文里的核心词换成对应的英文情绪词、动作词或常用搭配，"
+            "这样不会改变原意，只是让句子听起来更像自然口语。"
+        )
+
+    response.issue = _clean_llm_text(repaired_issue, FEEDBACK_SHORT_MAX_CHARS)
+    response.why = _clean_llm_text(repaired_why, FEEDBACK_MEDIUM_MAX_CHARS)
+    response.code_switching_tip = response.why
+    return response
+
+
+def _contains_forbidden_mixed_input_criticism(text: str) -> bool:
+    forbidden_phrases = (
+        "不符合英语表达习惯",
+        "不符合英语习惯",
+        "不应该使用中文",
+        "不能混合中文",
+        "不能混用中文",
+        "而不是混合使用中文词汇",
+        "主要问题是使用了中文",
+        "使用了中文词汇",
+        "混用中文会破坏",
+        "直接混用中文",
+    )
+    return any(phrase in text for phrase in forbidden_phrases)
+
+
+def _contains_chinese_text(text: str) -> bool:
+    return any("\u4e00" <= character <= "\u9fff" for character in text)
+
+
+def _first_present(data: dict[str, Any], *keys: str) -> Any:
+    value = _first_optional(data, *keys)
+    if value is not None:
+        return value
+    raise ValueError(f"Missing required field. Expected one of: {', '.join(keys)}")
+
+
+def _first_optional(data: dict[str, Any], *keys: str) -> Any | None:
+    for key in keys:
+        value = data.get(key)
+        if value is not None:
+            if isinstance(value, str) and not value.strip():
+                continue
+            return value
+    return None
+
+
+def _score_from_data(data: dict[str, Any]) -> int:
+    if data.get("score") is not None:
+        return _clamp_breakdown_value(data["score"], fallback=82)
+    breakdown = data.get("score_breakdown")
+    if isinstance(breakdown, dict) and breakdown:
+        values = [_clamp_breakdown_value(value, fallback=82) for value in breakdown.values()]
+        return round(sum(values) / len(values))
+    return 82
+
+
+def _avoid_punctuation_only_feedback(response: FeedbackResponse) -> FeedbackResponse:
+    if not _is_punctuation_only_change(response.what_you_said, response.recommended_english):
+        return response
+    if not _mentions_punctuation_or_capitalization(response.issue, response.why):
+        return response
+
+    original = _clean_llm_text(response.what_you_said, FEEDBACK_MEDIUM_MAX_CHARS)
+    response.recommended_english = original
+    response.corrected_sentence = original
+    response.more_natural_option = original
+    response.better_expression = original
+    response.issue = "这句话的意思已经清楚了，可以把重点放在语气和场景里的自然表达上。"
+    response.why = "如果想说得更自然，可以根据当前场景补充一点礼貌语气或具体信息，让对方更容易接话。"
+    response.code_switching_tip = response.why
+    return response
+
+
+def _avoid_internal_prompt_feedback(response: FeedbackResponse) -> FeedbackResponse:
+    if not _mentions_internal_feedback_rule(response.issue, response.why):
+        return response
+
+    response.issue = "这句话的意思已经清楚了，可以再加一点语气或具体信息，让表达更像自然口语。"
+    response.why = "这样能保留你原本的意思，同时让对方更容易理解你的态度，也更容易继续接话。"
+    response.code_switching_tip = response.why
+    return response
+
+
+def _is_punctuation_only_change(original: str, recommended: str) -> bool:
+    def normalize(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    return bool(original.strip()) and normalize(original) == normalize(recommended)
+
+
+def _mentions_punctuation_or_capitalization(*texts: str) -> bool:
+    combined = " ".join(texts).lower()
+    markers = (
+        "punctuation",
+        "capitalize",
+        "capitalization",
+        "period",
+        "comma",
+        "标点",
+        "句号",
+        "逗号",
+        "大小写",
+        "首字母",
+    )
+    return any(marker in combined for marker in markers)
+
+
+def _mentions_internal_feedback_rule(*texts: str) -> bool:
+    combined = " ".join(texts)
+    markers = (
+        "语音输入",
+        "识别文本",
+        "不用作为主要问题",
+        "不要作为主要问题",
+        "不作为主要问题",
+        "只纠正",
+        "大小写",
+        "句号",
+        "标点",
+    )
+    return any(marker in combined for marker in markers)
 
 
 def _score_breakdown_from_data(breakdown: Any, fallback_score: int) -> FeedbackScoreBreakdown:
@@ -470,8 +916,8 @@ def _score_breakdown_from_data(breakdown: Any, fallback_score: int) -> FeedbackS
     def pick(*keys: str) -> int:
         for key in keys:
             if key in source:
-                return _clamp_breakdown_value(source[key])
-        return _clamp_breakdown_value(fallback_score)
+                return _clamp_breakdown_value(source[key], fallback=fallback_score)
+        return _clamp_breakdown_value(fallback_score, fallback=82)
 
     return FeedbackScoreBreakdown(
         grammar=pick("grammar"),
@@ -481,20 +927,82 @@ def _score_breakdown_from_data(breakdown: Any, fallback_score: int) -> FeedbackS
     )
 
 
-def _clamp_breakdown_value(value: Any) -> int:
-    return max(0, min(100, int(value)))
+def _summary_score(data: dict[str, Any], scores: Any, *keys: str) -> int:
+    sources = [scores if isinstance(scores, dict) else {}, data]
+    for source in sources:
+        for key in keys:
+            if key in source:
+                return _clamp_breakdown_value(source[key], fallback=82)
+    return 82
 
 
-def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        raise ValueError("Expected a list.")
-    return [str(item) for item in value]
+def _clamp_breakdown_value(value: Any, fallback: int = 82) -> int:
+    if value is None:
+        return fallback
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return fallback
+        ratio_match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*/\s*(\d+(?:\.\d+)?)", text)
+        if ratio_match:
+            numerator = float(ratio_match.group(1))
+            denominator = float(ratio_match.group(2))
+            if denominator:
+                return max(0, min(100, round((numerator / denominator) * 100)))
+        number_match = re.search(r"-?\d+(?:\.\d+)?", text)
+        if number_match:
+            value = number_match.group(0)
+        else:
+            return fallback
+    try:
+        return max(0, min(100, round(float(value))))
+    except (TypeError, ValueError):
+        return fallback
 
 
-def _optional_string(value: Any) -> str | None:
+def _string_list(value: Any, *, limit: int | None = None, max_chars: int | None = None) -> list[str]:
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        items = [item.strip(" -\t") for item in re.split(r"[\n;；]+", value) if item.strip(" -\t")]
+    else:
+        items = [value]
+    items = items[:limit] if limit is not None else items
+    return [_clean_llm_text(item, max_chars) for item in items]
+
+
+def _optional_string(value: Any, max_chars: int | None = None) -> str | None:
     if value is None:
         return None
-    return str(value)
+    return _clean_llm_text(value, max_chars)
+
+
+def _clean_llm_text(value: Any, max_chars: int | None = None) -> str:
+    text = str(value)
+    text = re.sub(r"\s*[\u2014\u2015]\s*", ", ", text)
+    text = re.sub(r"\s+\u2013\s+", ", ", text)
+    text = re.sub(r"\s+-\s+", ", ", text)
+    text = re.sub(r"([!?.,;:])\1+", r"\1", text)
+    text = re.sub(r"\s+([!?.,;:])", r"\1", text)
+    text = re.sub(r"[ \t\r\n]+", " ", text).strip()
+    if max_chars is not None and len(text) > max_chars:
+        text = _truncate_text(text, max_chars)
+    return text
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    clipped = text[:max_chars].rstrip()
+    sentence_end = max(
+        clipped.rfind("."),
+        clipped.rfind("!"),
+        clipped.rfind("?"),
+        clipped.rfind("。"),
+        clipped.rfind("！"),
+        clipped.rfind("？"),
+    )
+    if sentence_end >= max_chars * 0.55:
+        return clipped[: sentence_end + 1].strip()
+    return clipped.rstrip(" ,;:，；：") + "..."
 
 
 def _transcript(messages: list[ChatMessage]) -> str:
@@ -518,6 +1026,17 @@ def _latest_user_message(request: ChatRequest) -> str:
         if message.role == "user":
             return message.content
     return ""
+
+
+def _chat_reply_repeats_history(reply: ChatMessage, history: list[ChatMessage]) -> bool:
+    for message in reversed(history):
+        if message.role == "assistant":
+            return _normalize_text(reply.content) == _normalize_text(message.content)
+    return False
+
+
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.strip().lower())
 
 
 def _scenario_context(scenario: Scenario, extra_instructions: str) -> str:

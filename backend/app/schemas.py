@@ -125,7 +125,6 @@ class ChatResponse(BaseModel):
     session_id: str
     scenario_id: str
     reply: ChatMessage
-    quick_feedback: FeedbackResponse
     provider: str = "mock"
     fallback_reason: str | None = None
 

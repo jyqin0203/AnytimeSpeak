@@ -29,6 +29,8 @@ export function useSpeechInput({
   const sessionRef = useRef<SpeechInputSession | null>(null);
   const finalTranscriptRef = useRef("");
   const shouldListenRef = useRef(false);
+  const acceptingResultsRef = useRef(false);
+  const sessionVersionRef = useRef(0);
   const onTranscriptChangeRef = useRef(onTranscriptChange);
 
   useEffect(() => {
@@ -84,6 +86,9 @@ export function useSpeechInput({
     }
 
     shouldListenRef.current = true;
+    acceptingResultsRef.current = true;
+    sessionVersionRef.current += 1;
+    const sessionVersion = sessionVersionRef.current;
     disposeSession();
     setState((current) => ({ ...current, isSupported: true, error: null }));
 
@@ -111,6 +116,10 @@ export function useSpeechInput({
           setState((current) => ({ ...current, isListening: false, isRestarting: false, error }));
         },
         onResult: (result) => {
+          if (!acceptingResultsRef.current || sessionVersion !== sessionVersionRef.current) {
+            return;
+          }
+
           if (result.providerId === "doubao-asr") {
             const nextTranscript = result.transcript.trim();
             const nextFinalTranscript = result.isFinal ? nextTranscript : result.finalTranscript.trim();
@@ -178,8 +187,12 @@ export function useSpeechInput({
   const stopListening = useCallback(() => {
     try {
       shouldListenRef.current = false;
-      sessionRef.current?.stop();
+      acceptingResultsRef.current = false;
+      sessionVersionRef.current += 1;
+      const session = sessionRef.current;
       sessionRef.current = null;
+      session?.stop();
+      session?.dispose();
       setState((current) => ({ ...current, isListening: false, isRestarting: false }));
     } catch (cause) {
       setState((current) => ({
@@ -199,6 +212,8 @@ export function useSpeechInput({
   useEffect(
     () => () => {
       shouldListenRef.current = false;
+      acceptingResultsRef.current = false;
+      sessionVersionRef.current += 1;
       disposeSession();
     },
     [disposeSession],
