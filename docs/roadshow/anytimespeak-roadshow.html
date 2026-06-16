@@ -1357,8 +1357,8 @@
 
         .slide-02 .content-grid {
             align-self: center;
-            gap: 20px;
-            padding-top: 24px;
+            gap: 24px;
+            padding-top: 10px;
         }
 
         .slide-02 .large-copy {
@@ -1366,32 +1366,56 @@
         }
 
         .slide-02 .point-row {
-            max-width: 1240px;
-            margin-top: 8px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 22px;
+            max-width: 1180px;
+            margin: 12px auto 0;
         }
 
         .slide-02 .point {
-            grid-template-columns: 54px 174px 1fr;
+            min-height: 218px;
+            grid-template-columns: 1fr;
+            justify-items: center;
+            align-content: center;
+            gap: 16px;
+            padding: 26px 24px;
+            text-align: center;
         }
 
         .point-icon {
             display: grid;
             place-items: center;
-            width: 42px;
-            height: 42px;
-            border-radius: 14px;
+            width: 58px;
+            height: 58px;
+            border-radius: 18px;
             background: rgba(108, 92, 231, 0.10);
             color: var(--primary-dark);
         }
 
         .point-icon svg {
-            width: 22px;
-            height: 22px;
+            width: 30px;
+            height: 30px;
             stroke: currentColor;
             stroke-width: 2.2;
             fill: none;
             stroke-linecap: round;
             stroke-linejoin: round;
+        }
+
+        .slide-02 .point h3 {
+            padding: 8px 18px;
+            border-radius: 999px;
+            background: rgba(238, 242, 255, 0.86);
+            font-size: 27px;
+        }
+
+        .slide-02 .point p {
+            max-width: 320px;
+            min-height: 66px;
+            white-space: normal;
+            font-size: 24px;
+            line-height: 1.36;
         }
 
         .inline-summary {
@@ -1780,7 +1804,7 @@
                     <div class="content-grid">
                         <p class="large-copy reveal d2" data-editable>口语学习的难点，不只是“说对”，更是能在低压力环境里反复开口，并获得及时反馈。</p>
                         <div class="point-row">
-                            <div class="point reveal d1"><span class="point-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 18h.01"></path><path d="M8 11a4 4 0 1 1 7.2 2.4c-1.2 1.1-2.2 1.8-2.8 3.1"></path><path d="M4 20h16"></path></svg></span><h3 data-editable>不敢开口</h3><p data-editable>缺少低压力、可反复练习的口语环境</p></div>
+                            <div class="point reveal d1"><span class="point-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h10a4 4 0 0 1 4 4v1a4 4 0 0 1-4 4H9l-5 4V6z"></path><path d="M19 8c1 .8 1.5 1.8 1.5 3s-.5 2.2-1.5 3"></path></svg></span><h3 data-editable>不敢开口</h3><p data-editable>缺少低压力、可反复练习的口语环境</p></div>
                             <div class="point reveal d2"><span class="point-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H7l-3 3z"></path><path d="M8 9h8"></path><path d="M8 13h5"></path></svg></span><h3 data-editable>缺少反馈</h3><p data-editable>说完后不知道哪里不自然、该怎么改</p></div>
                             <div class="point reveal d3"><span class="point-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19V5"></path><path d="M4 19h16"></path><path d="M8 15l3-3 3 2 5-7"></path></svg></span><h3 data-editable>难以复盘</h3><p data-editable>练习结束后没有沉淀，看不到持续进步</p></div>
                         </div>
