@@ -1,3 +1,4 @@
+import ast
 import json
 import logging
 import os
@@ -420,7 +421,7 @@ def _summary_prompt(request: SummaryRequest) -> list[dict[str, str]]:
 
 
 def _json_from_llm(content: str, operation: str) -> dict[str, Any]:
-    candidates = [content, *_code_fence_contents(content), *_json_object_candidates(content)]
+    candidates = [content, *_code_fence_contents(content), *_json_value_candidates(content)]
     start = content.find("{")
     end = content.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -434,14 +435,15 @@ def _json_from_llm(content: str, operation: str) -> dict[str, Any]:
             continue
         seen.add(candidate)
         try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError as exc:
+            parsed = _parse_json_like(candidate)
+        except (json.JSONDecodeError, SyntaxError, ValueError) as exc:
             last_error = exc
             continue
 
-        if not isinstance(parsed, dict):
-            raise LLMResponseParseError("LLM response must be a JSON object.")
-        return parsed
+        parsed_object = _first_json_object(parsed)
+        if parsed_object is not None:
+            return parsed_object
+        last_error = LLMResponseParseError("LLM response must contain a JSON object.")
 
     logger.warning(
         "llm_provider: parse_failed operation=%s response_length=%s",
@@ -469,19 +471,70 @@ def _code_fence_contents(content: str) -> list[str]:
     return [match.group(1) for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)```", content, re.IGNORECASE)]
 
 
-def _json_object_candidates(content: str) -> list[str]:
+def _json_value_candidates(content: str) -> list[str]:
     candidates: list[str] = []
     decoder = json.JSONDecoder()
     for index, character in enumerate(content):
-        if character != "{":
+        if character not in "{[":
             continue
         try:
             parsed, end = decoder.raw_decode(content[index:])
         except json.JSONDecodeError:
             continue
-        if isinstance(parsed, dict):
+        if _first_json_object(parsed) is not None:
             candidates.append(content[index : index + end])
     return candidates
+
+
+def _parse_json_like(candidate: str) -> Any:
+    last_error: Exception | None = None
+    for variant in _json_candidate_variants(candidate):
+        try:
+            return json.loads(variant)
+        except json.JSONDecodeError as exc:
+            last_error = exc
+
+        try:
+            return ast.literal_eval(variant)
+        except (SyntaxError, ValueError) as exc:
+            last_error = exc
+
+    raise json.JSONDecodeError("Unable to parse JSON-like LLM response.", candidate, 0) from last_error
+
+
+def _json_candidate_variants(candidate: str) -> list[str]:
+    normalized = candidate.strip()
+    smart_quotes = str.maketrans(
+        {
+            "\u201c": '"',
+            "\u201d": '"',
+            "\u2018": "'",
+            "\u2019": "'",
+        }
+    )
+    normalized = normalized.translate(smart_quotes)
+    without_trailing_commas = re.sub(r",\s*([}\]])", r"\1", normalized)
+    quoted_keys = re.sub(
+        r'([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:',
+        r'\1"\2":',
+        without_trailing_commas,
+    )
+
+    variants: list[str] = []
+    for value in (candidate.strip(), normalized, without_trailing_commas, quoted_keys):
+        if value and value not in variants:
+            variants.append(value)
+    return variants
+
+
+def _first_json_object(value: Any) -> dict[str, Any] | None:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        for item in value:
+            if isinstance(item, dict):
+                return item
+    return None
 
 
 def _fallback_reason(exc: Exception) -> str:

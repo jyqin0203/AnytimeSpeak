@@ -330,6 +330,39 @@ def test_json_parser_uses_first_valid_object_when_later_text_has_braces():
     assert parsed == {"provider": "llm", "score": 88}
 
 
+def test_json_parser_accepts_array_wrapped_object():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        '[{"provider":"llm","score":88}]',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_accepts_trailing_commas_and_smart_quotes():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        '{“provider”: “llm”, “score”: 88,}',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
+def test_json_parser_accepts_simple_unquoted_keys():
+    import app.llm_provider as llm_provider
+
+    parsed = llm_provider._json_from_llm(
+        '{provider: "llm", score: 88}',
+        "feedback",
+    )
+
+    assert parsed == {"provider": "llm", "score": 88}
+
+
 def test_feedback_falls_back_on_invalid_json_without_crashing(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
