@@ -42,6 +42,22 @@ export function useSpeechInput({
     sessionRef.current = null;
   }, []);
 
+  useEffect(() => {
+    shouldListenRef.current = false;
+    disposeSession();
+    finalTranscriptRef.current = "";
+    setState((current) => ({
+      ...current,
+      transcript: "",
+      finalTranscript: "",
+      interimTranscript: "",
+      isListening: false,
+      isRestarting: false,
+      isSupported: provider.getSupport(),
+      error: null,
+    }));
+  }, [disposeSession, provider]);
+
   const resetTranscript = useCallback(() => {
     finalTranscriptRef.current = "";
     setState((current) => ({
@@ -101,6 +117,25 @@ export function useSpeechInput({
         },
         onResult: (result) => {
           if (!acceptingResultsRef.current || sessionVersion !== sessionVersionRef.current) {
+            return;
+          }
+
+          if (result.providerId === "doubao-asr") {
+            const nextTranscript = result.transcript.trim();
+            const nextFinalTranscript = result.isFinal ? nextTranscript : result.finalTranscript.trim();
+            finalTranscriptRef.current = nextFinalTranscript;
+            setState((current) => ({
+              ...current,
+              transcript: nextTranscript,
+              finalTranscript: nextFinalTranscript,
+              interimTranscript: result.interimTranscript,
+              error: null,
+            }));
+            onTranscriptChangeRef.current?.(nextTranscript, {
+              ...result,
+              transcript: nextTranscript,
+              finalTranscript: nextFinalTranscript,
+            });
             return;
           }
 

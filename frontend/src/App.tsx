@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
+  assessPronunciation,
   createLocalReply,
   createLocalSummary,
   fetchScenarios,
@@ -10,6 +11,7 @@ import {
   startPracticeSession,
   type Feedback,
   type Message,
+  type PronunciationAssessment,
   type Scenario,
   type SessionSummary,
 } from "./api/coaching";
@@ -41,7 +43,15 @@ import {
   sourceLabel,
   type SourceState,
 } from "./providerStatus";
-import { useSpeechInput, useSpeechOutput, useVoiceRecorder, type VoiceRecording } from "./speech";
+import {
+  browserSpeechInputProvider,
+  doubaoSpeechProvider,
+  useSpeechInput,
+  useSpeechOutput,
+  useVoiceRecorder,
+  type SpeechInputProvider,
+  type VoiceRecording,
+} from "./speech";
 import "./App.css";
 
 type View = "home" | "scenarios" | "practice" | "summary" | "history" | "history-detail";
@@ -85,8 +95,26 @@ function App() {
   // saved retroactively when the user creates a profile.
   const pendingHistoryRef = useRef<Omit<SaveHistoryPayload, "userId"> | null>(loadPendingHistory());
 
+  // ASR provider: start with browser fallback, upgrade to Doubao if configured
+  const [asrProvider, setAsrProvider] = useState<SpeechInputProvider>(browserSpeechInputProvider);
+
   useEffect(() => {
     void loadScenarios();
+  }, []);
+
+  useEffect(() => {
+    // Fetch ASR mode from backend; switch to Doubao provider when available
+    const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "http://127.0.0.1:8000";
+    fetch(`${apiBase}/api/asr/mode`)
+      .then((r) => r.json())
+      .then((data: { asr_mode?: string }) => {
+        if (data.asr_mode === "doubao" && doubaoSpeechProvider.getSupport()) {
+          setAsrProvider(doubaoSpeechProvider);
+        }
+      })
+      .catch(() => {
+        // Keep browser provider on network error — text fallback always available
+      });
   }, []);
 
   useEffect(() => {
@@ -165,7 +193,7 @@ function App() {
   };
 
   const sendText = useCallback(
-    async (rawText: string, recording?: VoiceRecording | null) => {
+    async (rawText: string, recording?: VoiceRecording | null, inputMode: "text" | "voice" = "text") => {
       const text = rawText.trim();
       if (!text || sendStatus === "loading") return;
 
@@ -193,11 +221,39 @@ function App() {
 
       void fetchTurnFeedback(selected, sessionId, conversationHistory, userMessage)
         .then((turnFeedback) => {
+          const feedbackForTurn: Feedback = {
+            ...turnFeedback,
+            pronunciationInputMode: inputMode,
+          };
           setFeedback((current) =>
-            [...current.filter((item) => item.id !== turnFeedback.id), turnFeedback].sort((a, b) => a.id - b.id),
+            [...current.filter((item) => item.id !== feedbackForTurn.id), feedbackForTurn].sort((a, b) => a.id - b.id),
           );
           if (feedbackRequestSeqRef.current === feedbackRequestSeq) {
             setFeedbackStatus("idle");
+          }
+          if (inputMode === "voice") {
+            void assessPronunciation({
+              scenario: selected,
+              sessionId,
+              userMessage: userMessage.text,
+              transcript: userMessage.text,
+              referenceText: turnFeedback.recommendedEnglish,
+              audioDurationMs: recording?.durationMs,
+              recognizedLanguage: "en-US",
+              audio: recording?.blob ?? null,
+            })
+              .then((pronunciation) => {
+                setFeedback((current) =>
+                  current.map((item) => (item.id === userMessage.id ? { ...item, pronunciation } : item)),
+                );
+              })
+              .catch(() => {
+                setFeedback((current) =>
+                  current.map((item) =>
+                    item.id === userMessage.id ? { ...item, pronunciation: null, pronunciationInputMode: "voice" } : item,
+                  ),
+                );
+              });
           }
         })
         .catch(() => {
@@ -226,12 +282,12 @@ function App() {
 
   const send = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    void sendText(input);
+    void sendText(input, null, "text");
   };
 
   const submitVoiceText = (text: string, recording?: VoiceRecording | null) => {
     if (!text || sendStatus === "loading") return;
-    void sendText(text, recording);
+    void sendText(text, recording, "voice");
   };
 
   const trySaveHistory = async (user: AuthUser, payload: Omit<SaveHistoryPayload, "userId">) => {
@@ -466,11 +522,13 @@ function App() {
           source={source}
           statusText={statusText}
           sendStatus={sendStatus}
+          asrProvider={asrProvider}
           onInput={setInput}
           onSend={send}
           onSendText={submitVoiceText}
           onEnd={endPractice}
           onReset={() => setView("scenarios")}
+          onAsrFallback={() => setAsrProvider(browserSpeechInputProvider)}
         />
       )}
       {view === "summary" && (
@@ -993,11 +1051,13 @@ function Practice({
   source,
   statusText,
   sendStatus,
+  asrProvider,
   onInput,
   onSend,
   onSendText,
   onEnd,
   onReset,
+  onAsrFallback,
 }: {
   scenario: Scenario;
   messages: Message[];
@@ -1009,11 +1069,13 @@ function Practice({
   source: SourceState;
   statusText: string;
   sendStatus: AsyncState;
+  asrProvider: SpeechInputProvider;
   onInput: (value: string) => void;
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   onSendText: (value: string, recording?: VoiceRecording | null) => void;
   onEnd: () => void;
   onReset: () => void;
+  onAsrFallback: () => void;
 }) {
   const turns = messages.filter((message) => message.sender === "user").length;
   const latestFeedback = feedback[feedback.length - 1];
@@ -1025,8 +1087,12 @@ function Practice({
   const playbackRef = useRef<HTMLAudioElement | null>(null);
   const speechOutput = useSpeechOutput({ lang: "en-US", rate: 0.95, pitch: 1 });
   const voiceRecorder = useVoiceRecorder();
+  // Use Doubao ASR when configured; otherwise falls back to browser SpeechRecognition.
+  // The lang for Doubao is "zh-CN" (mixed Chinese-English); browser uses "en-US".
+  const speechInputLang = asrProvider.id === "doubao-asr" ? "zh-CN" : "en-US";
   const speechInput = useSpeechInput({
-    lang: "en-US",
+    provider: asrProvider,
+    lang: speechInputLang,
     interimResults: true,
     continuous: true,
     onTranscriptChange: (transcript) => {
@@ -1035,6 +1101,13 @@ function Practice({
     },
   });
   const isRecording = speechInput.isListening || speechInput.isRestarting;
+
+  // When Doubao ASR fails, automatically fall back to browser SpeechRecognition.
+  useEffect(() => {
+    if (asrProvider.id === "doubao-asr" && speechInput.error) {
+      onAsrFallback();
+    }
+  }, [asrProvider.id, speechInput.error, onAsrFallback]);
 
   useEffect(() => {
     if (!latestAiMessage || latestAiMessage.isLoading) return;
@@ -1065,6 +1138,7 @@ function Practice({
 
     latestTranscriptRef.current = "";
     speechInput.resetTranscript();
+    onInput("");
     void voiceRecorder.startRecording().finally(() => {
       speechInput.startListening();
     });
@@ -1176,7 +1250,13 @@ function Practice({
             className="chat-input"
             value={input}
             onChange={(e) => onInput(e.target.value)}
-            placeholder={isRecording ? "聆听中，再点一次停止并发送..." : "输入回答，或点击右侧麦克风说话"}
+            placeholder={
+              isRecording
+                ? asrProvider.id === "doubao-asr"
+                  ? "豆包语音识别中，再点一次停止并发送..."
+                  : "聆听中，再点一次停止并发送..."
+                : "输入回答，或点击右侧麦克风说话"
+            }
             disabled={sendStatus === "loading"}
             autoComplete="off"
           />
@@ -1194,6 +1274,11 @@ function Practice({
             {sendStatus === "loading" ? "..." : "发送"}
           </button>
         </form>
+        {speechInput.error && asrProvider.id !== "doubao-asr" && (
+          <p className="asr-error" role="alert">
+            语音识别：{speechInput.error.message}
+          </p>
+        )}
       </div>
 
       <aside className="feedback-panel">
@@ -1257,12 +1342,71 @@ function Practice({
                     ))}
                   </div>
                 </div>
+                <PronunciationMiniPanel feedback={latestFeedback} />
               </article>
             )}
           </div>
         )}
       </aside>
     </section>
+  );
+}
+
+function PronunciationMiniPanel({ feedback }: { feedback: Feedback }) {
+  if (feedback.pronunciationInputMode === "text") {
+    return (
+      <div className="pronunciation-mini muted">
+        <div className="pronunciation-mini-head">
+          <span>发音测评</span>
+          <strong>文本</strong>
+        </div>
+        <p>文本输入暂无发音测评。</p>
+      </div>
+    );
+  }
+
+  if (feedback.pronunciationInputMode === "voice" && feedback.pronunciation === undefined) {
+    return (
+      <div className="pronunciation-mini">
+        <div className="pronunciation-mini-head">
+          <span>发音测评</span>
+          <strong>...</strong>
+        </div>
+        <p>正在分析发音...</p>
+      </div>
+    );
+  }
+
+  if (feedback.pronunciationInputMode === "voice" && feedback.pronunciation === null) {
+    return (
+      <div className="pronunciation-mini muted">
+        <div className="pronunciation-mini-head">
+          <span>发音测评</span>
+          <strong>--</strong>
+        </div>
+        <p>本轮发音测评暂时不可用。</p>
+      </div>
+    );
+  }
+
+  if (!feedback.pronunciation) return null;
+  return <PronunciationSummary assessment={feedback.pronunciation} />;
+}
+
+function PronunciationSummary({ assessment }: { assessment: PronunciationAssessment }) {
+  return (
+    <div className="pronunciation-mini">
+      <div className="pronunciation-mini-head">
+        <span>发音测评</span>
+        <strong>{assessment.overallScore}</strong>
+      </div>
+      <div className="pronunciation-score-row">
+        <span>流利度 {assessment.fluencyScore}</span>
+        <span>准确度 {assessment.accuracyScore}</span>
+        <span>完整度 {assessment.completenessScore}</span>
+      </div>
+      <p>{assessment.improvementTips[0] ?? assessment.feedbackZh}</p>
+    </div>
   );
 }
 
