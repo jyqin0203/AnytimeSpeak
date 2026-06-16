@@ -671,7 +671,62 @@ def _feedback_from_data(data: Any, request: FeedbackRequest | None = None) -> Fe
         user_intent_zh=user_intent,
         code_switching_tip=why,
     )
+    response = _avoid_forbidden_mixed_input_feedback(response, request)
     return _avoid_punctuation_only_feedback(response)
+
+
+def _avoid_forbidden_mixed_input_feedback(
+    response: FeedbackResponse,
+    request: FeedbackRequest | None,
+) -> FeedbackResponse:
+    if not _contains_chinese_text(response.what_you_said):
+        return response
+
+    checked_text = " ".join(
+        text
+        for text in (response.issue, response.why, response.code_switching_tip or "")
+        if text
+    )
+    if not _contains_forbidden_mixed_input_criticism(checked_text):
+        return response
+
+    repaired_issue = "你的意思表达清楚了，可以把其中的关键词换成更自然的英文口语说法。"
+    repaired_why = ""
+    if request is not None:
+        mock_feedback = mock_service.create_feedback(request)
+        repaired_why = mock_feedback.why
+        if mock_feedback.issue:
+            repaired_issue = mock_feedback.issue
+    if not repaired_why:
+        repaired_why = (
+            "你的意思表达清楚了。这里可以把中文里的核心词换成对应的英文情绪词、动作词或常用搭配，"
+            "这样不会改变原意，只是让句子听起来更像自然口语。"
+        )
+
+    response.issue = _clean_llm_text(repaired_issue, FEEDBACK_SHORT_MAX_CHARS)
+    response.why = _clean_llm_text(repaired_why, FEEDBACK_MEDIUM_MAX_CHARS)
+    response.code_switching_tip = response.why
+    return response
+
+
+def _contains_forbidden_mixed_input_criticism(text: str) -> bool:
+    forbidden_phrases = (
+        "不符合英语表达习惯",
+        "不符合英语习惯",
+        "不应该使用中文",
+        "不能混合中文",
+        "不能混用中文",
+        "而不是混合使用中文词汇",
+        "主要问题是使用了中文",
+        "使用了中文词汇",
+        "混用中文会破坏",
+        "直接混用中文",
+    )
+    return any(phrase in text for phrase in forbidden_phrases)
+
+
+def _contains_chinese_text(text: str) -> bool:
+    return any("\u4e00" <= character <= "\u9fff" for character in text)
 
 
 def _first_present(data: dict[str, Any], *keys: str) -> Any:

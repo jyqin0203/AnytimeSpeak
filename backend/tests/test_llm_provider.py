@@ -667,6 +667,54 @@ def test_feedback_repairs_invalid_scores_without_schema_fallback(monkeypatch: py
     assert response.score_breakdown.clarity == 80
 
 
+def test_feedback_sanitizes_forbidden_mixed_input_criticism(monkeypatch: pytest.MonkeyPatch):
+    import app.llm_provider as llm_provider
+
+    monkeypatch.setenv("LLM_PROVIDER_MODE", "llm")
+    monkeypatch.setenv("LLM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("LLM_MODEL", "demo-model")
+
+    def fake_chat_completion(messages):
+        return """
+        {
+          "what_you_said": "I am so 伤心.",
+          "user_intent": "表达自己很伤心",
+          "recommended_english": "I'm feeling really sad right now.",
+          "issue": "使用中文词汇'伤心'不符合英语表达习惯",
+          "why": "直接混用中文词会破坏语言流畅性。",
+          "more_natural_option": "I've been feeling really down lately.",
+          "score": 70,
+          "score_breakdown": {
+            "grammar": 90,
+            "naturalness": 60,
+            "relevance": 90,
+            "clarity": 70
+          }
+        }
+        """
+
+    monkeypatch.setattr(llm_provider, "_request_chat_completion", fake_chat_completion)
+
+    response = llm_provider.create_feedback_with_fallback(
+        FeedbackRequest(scenario_id="daily", latest_user_message="I am so 伤心.")
+    )
+
+    forbidden = [
+        "不符合英语表达习惯",
+        "使用中文词汇",
+        "直接混用中文",
+        "破坏语言流畅性",
+    ]
+    combined = f"{response.issue} {response.why} {response.code_switching_tip}"
+
+    assert response.provider == "llm"
+    assert response.fallback_reason is None
+    assert response.recommended_english == "I'm feeling really sad right now."
+    assert all(phrase not in combined for phrase in forbidden)
+    assert "sad" in response.why or "feeling down" in response.why
+
+
 def test_feedback_ignores_punctuation_only_voice_transcript_corrections(monkeypatch: pytest.MonkeyPatch):
     import app.llm_provider as llm_provider
 
